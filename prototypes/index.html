@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statify - Week 11 Board</title>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">stat<span>ify</span></div>
+  <nav class="nav">
+    <a href="index.html" class="active">Board</a>
+    <a href="player.html">Players</a>
+    <a href="accuracy.html">Accuracy</a>
+  </nav>
+  <div class="topbar-right">
+    <span class="num">2025 · WK 11</span>
+    <span>lines 14m ago</span>
+    <span>model v1.2.0</span>
+  </div>
+</header>
+
+<main class="page">
+
+  <div class="page-head">
+    <h1>Weekly Board</h1>
+    <span class="sub num">218 props · 41 with edge &gt; 1.0 · sorted by edge</span>
+  </div>
+
+  <div class="filters">
+    <span class="filter-label">Pos</span>
+    <button class="chip on">ALL</button>
+    <button class="chip">QB</button>
+    <button class="chip">RB</button>
+    <button class="chip">WR</button>
+    <button class="chip">TE</button>
+    <span class="divider-v"></span>
+    <span class="filter-label">Stat</span>
+    <button class="chip on">ALL</button>
+    <button class="chip">REC YDS</button>
+    <button class="chip">REC</button>
+    <button class="chip">RUSH YDS</button>
+    <button class="chip">PASS YDS</button>
+    <button class="chip">TD</button>
+    <span class="divider-v"></span>
+    <span class="filter-label">Min edge</span>
+    <button class="chip">0.0</button>
+    <button class="chip on">1.0</button>
+    <button class="chip">2.5</button>
+    <span class="divider-v"></span>
+    <button class="chip">hide questionable</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Pos</th>
+          <th>Team</th>
+          <th>Opp</th>
+          <th>Stat</th>
+          <th class="r">Proj</th>
+          <th class="r">Line</th>
+          <th>Book</th>
+          <th class="r sorted">Edge</th>
+          <th class="r">Conf</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="player">Puka Nacua</td>
+          <td class="pos">WR</td>
+          <td class="team">LAR</td>
+          <td class="opp">@SEA</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">86.4</td>
+          <td class="r num">72.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-p5">
+            <span class="edge-bar" style="width:100%;background:var(--edge-pos-5)"></span>+13.9
+          </td>
+          <td class="r num">0.71</td>
+        </tr>
+        <tr>
+          <td class="player">Jonathan Taylor</td>
+          <td class="pos">RB</td>
+          <td class="team">IND</td>
+          <td class="opp">vs NYJ</td>
+          <td class="stat-type">RUSH YDS</td>
+          <td class="r num">94.1</td>
+          <td class="r num">82.5</td>
+          <td class="book">FD</td>
+          <td class="edge edge-cell e-p5">
+            <span class="edge-bar" style="width:84%;background:var(--edge-pos-5)"></span>+11.6
+          </td>
+          <td class="r num">0.68</td>
+        </tr>
+        <tr>
+          <td class="player">Trey McBride</td>
+          <td class="pos">TE</td>
+          <td class="team">ARI</td>
+          <td class="opp">@SF</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">61.8</td>
+          <td class="r num">52.5</td>
+          <td class="book">MGM</td>
+          <td class="edge edge-cell e-p4">
+            <span class="edge-bar" style="width:67%;background:var(--edge-pos-4)"></span>+9.3
+          </td>
+          <td class="r num">0.64</td>
+        </tr>
+        <tr>
+          <td class="player">Jayden Daniels</td>
+          <td class="pos">QB</td>
+          <td class="team">WAS</td>
+          <td class="opp">vs PHI</td>
+          <td class="stat-type">PASS YDS</td>
+          <td class="r num">253.7</td>
+          <td class="r num">245.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-p4">
+            <span class="edge-bar" style="width:59%;background:var(--edge-pos-4)"></span>+8.2
+          </td>
+          <td class="r num">0.55</td>
+        </tr>
+        <tr>
+          <td class="player">Rashee Rice <span class="flag flag-q">Q</span></td>
+          <td class="pos">WR</td>
+          <td class="team">KC</td>
+          <td class="opp">@BUF</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">67.2</td>
+          <td class="r num">59.5</td>
+          <td class="book">FD</td>
+          <td class="edge edge-cell e-p4">
+            <span class="edge-bar" style="width:55%;background:var(--edge-pos-4)"></span>+7.7
+          </td>
+          <td class="r num">0.38</td>
+        </tr>
+        <tr>
+          <td class="player">Bijan Robinson</td>
+          <td class="pos">RB</td>
+          <td class="team">ATL</td>
+          <td class="opp">vs CAR</td>
+          <td class="stat-type">RUSH YDS</td>
+          <td class="r num">88.9</td>
+          <td class="r num">81.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-p4">
+            <span class="edge-bar" style="width:53%;background:var(--edge-pos-4)"></span>+7.4
+          </td>
+          <td class="r num">0.66</td>
+        </tr>
+        <tr>
+          <td class="player">Ladd McConkey</td>
+          <td class="pos">WR</td>
+          <td class="team">LAC</td>
+          <td class="opp">@CIN</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">71.5</td>
+          <td class="r num">65.5</td>
+          <td class="book">MGM</td>
+          <td class="edge edge-cell e-p3">
+            <span class="edge-bar" style="width:43%;background:var(--edge-pos-3)"></span>+6.0
+          </td>
+          <td class="r num">0.61</td>
+        </tr>
+        <tr>
+          <td class="player">Sam LaPorta</td>
+          <td class="pos">TE</td>
+          <td class="team">DET</td>
+          <td class="opp">vs GB</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">54.3</td>
+          <td class="r num">48.5</td>
+          <td class="book">FD <span class="flag flag-stale">4h</span></td>
+          <td class="edge edge-cell e-p3">
+            <span class="edge-bar" style="width:42%;background:var(--edge-pos-3)"></span>+5.8
+          </td>
+          <td class="r num">0.42</td>
+        </tr>
+        <tr>
+          <td class="player">Chase Brown</td>
+          <td class="pos">RB</td>
+          <td class="team">CIN</td>
+          <td class="opp">vs LAC</td>
+          <td class="stat-type">REC</td>
+          <td class="r num">4.8</td>
+          <td class="r num">3.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-p3">
+            <span class="edge-bar" style="width:38%;background:var(--edge-pos-3)"></span>+1.3
+          </td>
+          <td class="r num">0.59</td>
+        </tr>
+        <tr>
+          <td class="player">Garrett Wilson</td>
+          <td class="pos">WR</td>
+          <td class="team">NYJ</td>
+          <td class="opp">@IND</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">69.7</td>
+          <td class="r num">64.5</td>
+          <td class="book">CZR</td>
+          <td class="edge edge-cell e-p3">
+            <span class="edge-bar" style="width:37%;background:var(--edge-pos-3)"></span>+5.2
+          </td>
+          <td class="r num">0.57</td>
+        </tr>
+        <tr>
+          <td class="player">Nico Collins</td>
+          <td class="pos">WR</td>
+          <td class="team">HOU</td>
+          <td class="opp">vs TEN</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">78.1</td>
+          <td class="r num">73.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-p2">
+            <span class="edge-bar" style="width:33%;background:var(--edge-pos-2)"></span>+4.6
+          </td>
+          <td class="r num">0.62</td>
+        </tr>
+        <tr>
+          <td class="player">De'Von Achane</td>
+          <td class="pos">RB</td>
+          <td class="team">MIA</td>
+          <td class="opp">@LV</td>
+          <td class="stat-type">REC</td>
+          <td class="r num">5.1</td>
+          <td class="r num">4.5</td>
+          <td class="book">FD</td>
+          <td class="edge edge-cell e-p2">
+            <span class="edge-bar" style="width:24%;background:var(--edge-pos-2)"></span>+0.6
+          </td>
+          <td class="r num">0.53</td>
+        </tr>
+        <tr>
+          <td class="player">Brock Bowers</td>
+          <td class="pos">TE</td>
+          <td class="team">LV</td>
+          <td class="opp">vs MIA</td>
+          <td class="stat-type">REC</td>
+          <td class="r num">6.2</td>
+          <td class="r num">5.5</td>
+          <td class="book">MGM</td>
+          <td class="edge edge-cell e-p2">
+            <span class="edge-bar" style="width:22%;background:var(--edge-pos-2)"></span>+0.7
+          </td>
+          <td class="r num">0.60</td>
+        </tr>
+        <tr>
+          <td class="player">Josh Allen</td>
+          <td class="pos">QB</td>
+          <td class="team">BUF</td>
+          <td class="opp">vs KC</td>
+          <td class="stat-type">PASS YDS</td>
+          <td class="r num">248.9</td>
+          <td class="r num">246.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-p1">
+            <span class="edge-bar" style="width:14%;background:var(--edge-pos-1)"></span>+2.4
+          </td>
+          <td class="r num">0.49</td>
+        </tr>
+        <tr>
+          <td class="player">Tyreek Hill</td>
+          <td class="pos">WR</td>
+          <td class="team">MIA</td>
+          <td class="opp">@LV</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">63.4</td>
+          <td class="r num">62.5</td>
+          <td class="book">FD</td>
+          <td class="edge edge-cell e-p1">
+            <span class="edge-bar" style="width:6%;background:var(--edge-pos-1)"></span>+0.9
+          </td>
+          <td class="r num">0.44</td>
+        </tr>
+        <tr>
+          <td class="player">Travis Kelce</td>
+          <td class="pos">TE</td>
+          <td class="team">KC</td>
+          <td class="opp">@BUF</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">51.2</td>
+          <td class="r num">52.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-n1">
+            <span class="edge-bar" style="width:9%;background:var(--edge-neg-1)"></span>-1.3
+          </td>
+          <td class="r num">0.47</td>
+        </tr>
+        <tr>
+          <td class="player">Saquon Barkley</td>
+          <td class="pos">RB</td>
+          <td class="team">PHI</td>
+          <td class="opp">@WAS</td>
+          <td class="stat-type">RUSH YDS</td>
+          <td class="r num">89.6</td>
+          <td class="r num">94.5</td>
+          <td class="book">MGM</td>
+          <td class="edge edge-cell e-n2">
+            <span class="edge-bar" style="width:35%;background:var(--edge-neg-2)"></span>-4.9
+          </td>
+          <td class="r num">0.58</td>
+        </tr>
+        <tr>
+          <td class="player">Zay Flowers</td>
+          <td class="pos">WR</td>
+          <td class="team">BAL</td>
+          <td class="opp">vs PIT</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">57.8</td>
+          <td class="r num">64.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-n3">
+            <span class="edge-bar" style="width:48%;background:var(--edge-neg-3)"></span>-6.7
+          </td>
+          <td class="r num">0.63</td>
+        </tr>
+        <tr>
+          <td class="player">Courtland Sutton</td>
+          <td class="pos">WR</td>
+          <td class="team">DEN</td>
+          <td class="opp">@ATL</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">54.9</td>
+          <td class="r num">63.5</td>
+          <td class="book">FD</td>
+          <td class="edge edge-cell e-n4">
+            <span class="edge-bar" style="width:62%;background:var(--edge-neg-4)"></span>-8.6
+          </td>
+          <td class="r num">0.60</td>
+        </tr>
+        <tr>
+          <td class="player">Kyren Williams</td>
+          <td class="pos">RB</td>
+          <td class="team">LAR</td>
+          <td class="opp">@SEA</td>
+          <td class="stat-type">RUSH YDS</td>
+          <td class="r num">62.3</td>
+          <td class="r num">72.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-n4">
+            <span class="edge-bar" style="width:74%;background:var(--edge-neg-4)"></span>-10.2
+          </td>
+          <td class="r num">0.65</td>
+        </tr>
+        <tr>
+          <td class="player">Davante Adams</td>
+          <td class="pos">WR</td>
+          <td class="team">NYJ</td>
+          <td class="opp">@IND</td>
+          <td class="stat-type">REC YDS</td>
+          <td class="r num">55.1</td>
+          <td class="r num">67.5</td>
+          <td class="book">CZR</td>
+          <td class="edge edge-cell e-n5">
+            <span class="edge-bar" style="width:90%;background:var(--edge-neg-5)"></span>-12.4
+          </td>
+          <td class="r num">0.69</td>
+        </tr>
+        <tr>
+          <td class="player">Amon-Ra St. Brown</td>
+          <td class="pos">WR</td>
+          <td class="team">DET</td>
+          <td class="opp">vs GB</td>
+          <td class="stat-type">REC</td>
+          <td class="r num">5.4</td>
+          <td class="r num">7.5</td>
+          <td class="book">DK</td>
+          <td class="edge edge-cell e-n5">
+            <span class="edge-bar" style="width:96%;background:var(--edge-neg-5)"></span>-2.1
+          </td>
+          <td class="r num">0.72</td>
+        </tr>
+        <tr>
+          <td class="player">Christian McCaffrey <span class="flag flag-o">OUT</span></td>
+          <td class="pos">RB</td>
+          <td class="team">SF</td>
+          <td class="opp">vs ARI</td>
+          <td class="stat-type">RUSH YDS</td>
+          <td class="r num" style="color:var(--faint)">—</td>
+          <td class="r num">78.5</td>
+          <td class="book">FD</td>
+          <td class="edge edge-cell" style="color:var(--faint)">—</td>
+          <td class="r num" style="color:var(--faint)">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:var(--edge-neg-5)"></i>miss line big</span>
+    <span><i style="background:var(--edge-neg-2)"></i>miss small</span>
+    <span><i style="background:var(--edge-pos-2)"></i>beat small</span>
+    <span><i style="background:var(--edge-pos-5)"></i>beat line big</span>
+    <span style="margin-left:auto"><span class="flag flag-q">Q</span> questionable · <span class="flag flag-stale">4h</span> stale line</span>
+  </div>
+
+  <p class="foot">Edge = projection − market line. Confidence from projected variance. Lines captured 14 minutes ago; rows flagged stale are older than 3 hours.</p>
+
+</main>
+
+</body>
+</html>

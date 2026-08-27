@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statify - Model Accuracy</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+  .cards.four { grid-template-columns: repeat(4, 1fr); }
+  .cards.two { grid-template-columns: 1fr 1fr; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">stat<span>ify</span></div>
+  <nav class="nav">
+    <a href="index.html">Board</a>
+    <a href="player.html">Players</a>
+    <a href="accuracy.html" class="active">Accuracy</a>
+  </nav>
+  <div class="topbar-right">
+    <span class="num">2025 · WK 4–10</span>
+    <span>1,284 graded props</span>
+  </div>
+</header>
+
+<main class="page">
+
+  <div class="page-head">
+    <h1>Model Accuracy</h1>
+    <span class="sub">Weeks 4–10 · graded against actuals and closing lines</span>
+  </div>
+
+  <div class="filters">
+    <span class="filter-label">Model</span>
+    <button class="chip on">v1.2.0</button>
+    <button class="chip">v1.1.0</button>
+    <button class="chip">v1.0.0</button>
+    <span class="divider-v"></span>
+    <span class="filter-label">Stat</span>
+    <button class="chip on">ALL</button>
+    <button class="chip">REC YDS</button>
+    <button class="chip">RUSH YDS</button>
+    <button class="chip">REC</button>
+    <span class="divider-v"></span>
+    <span class="filter-label">Min edge</span>
+    <button class="chip">0.0</button>
+    <button class="chip on">2.5</button>
+  </div>
+
+  <!-- headline: is this actually beating the market -->
+  <div class="cards four">
+    <div class="card">
+      <h2>MAE</h2>
+      <div class="stat">18.7</div>
+      <div class="stat-sub">yards · ▼ 2.1 vs v1.1.0</div>
+    </div>
+    <div class="card">
+      <h2>RMSE</h2>
+      <div class="stat">26.4</div>
+      <div class="stat-sub">yards · ▼ 1.4 vs v1.1.0</div>
+    </div>
+    <div class="card">
+      <h2>Hit rate vs line</h2>
+      <div class="stat" style="color:var(--edge-pos-4)">54.1%</div>
+      <div class="stat-sub">edge &gt; 2.5 · 412 props</div>
+    </div>
+    <div class="card">
+      <h2>Break-even</h2>
+      <div class="stat" style="color:var(--muted)">52.4%</div>
+      <div class="stat-sub">at -110 · +1.7 pts clear</div>
+    </div>
+  </div>
+
+  <div class="cards two">
+
+    <div class="card">
+      <h2>Error trend by week</h2>
+      <svg class="chart" viewBox="0 0 460 180" height="180">
+        <line class="grid-line" x1="34" y1="20"  x2="450" y2="20"/>
+        <line class="grid-line" x1="34" y1="60"  x2="450" y2="60"/>
+        <line class="grid-line" x1="34" y1="100" x2="450" y2="100"/>
+        <line class="grid-line" x1="34" y1="140" x2="450" y2="140"/>
+
+        <text class="axis-label" x="0" y="24">32</text>
+        <text class="axis-label" x="0" y="64">26</text>
+        <text class="axis-label" x="0" y="104">20</text>
+        <text class="axis-label" x="0" y="144">14</text>
+
+        <polyline class="series-line alt" points="60,42 125,55 190,48 255,62 320,58 385,70 450,66"/>
+        <polyline class="series-line" points="60,86 125,98 190,92 255,108 320,104 385,118 450,122"/>
+
+        <text class="axis-label" x="52"  y="166">W4</text>
+        <text class="axis-label" x="117" y="166">W5</text>
+        <text class="axis-label" x="182" y="166">W6</text>
+        <text class="axis-label" x="247" y="166">W7</text>
+        <text class="axis-label" x="312" y="166">W8</text>
+        <text class="axis-label" x="377" y="166">W9</text>
+        <text class="axis-label" x="437" y="166">W10</text>
+      </svg>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>MAE</span>
+        <span><i style="background:var(--muted)"></i>RMSE</span>
+      </div>
+      <p class="foot">Both trending down since the v1.2.0 weight change in Week 8.</p>
+    </div>
+
+    <div class="card">
+      <h2>Error distribution</h2>
+      <svg class="chart" viewBox="0 0 460 180" height="180">
+        <line class="grid-line" x1="0" y1="140" x2="460" y2="140"/>
+
+        <rect class="bar-neg" x="14"  y="130" width="34" height="10"/>
+        <rect class="bar-neg" x="52"  y="112" width="34" height="28"/>
+        <rect class="bar-neg" x="90"  y="84"  width="34" height="56"/>
+        <rect class="bar-neg" x="128" y="52"  width="34" height="88"/>
+        <rect class="bar-neg" x="166" y="28"  width="34" height="112"/>
+        <rect class="bar-neutral" x="204" y="20" width="34" height="120"/>
+        <rect class="bar-pos" x="242" y="32"  width="34" height="108"/>
+        <rect class="bar-pos" x="280" y="58"  width="34" height="82"/>
+        <rect class="bar-pos" x="318" y="90"  width="34" height="50"/>
+        <rect class="bar-pos" x="356" y="116" width="34" height="24"/>
+        <rect class="bar-pos" x="394" y="132" width="34" height="8"/>
+
+        <text class="axis-label" x="14"  y="158">-50</text>
+        <text class="axis-label" x="128" y="158">-20</text>
+        <text class="axis-label" x="210" y="158">0</text>
+        <text class="axis-label" x="310" y="158">+20</text>
+        <text class="axis-label" x="394" y="158">+50</text>
+      </svg>
+      <div class="legend">
+        <span><i style="background:var(--edge-neg-3)"></i>over-projected</span>
+        <span><i style="background:var(--edge-pos-3)"></i>under-projected</span>
+      </div>
+      <p class="foot">Roughly centered, mild right skew: the model under-projects ceiling games more than it over-projects floors.</p>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <h2>By stat type · model v1.2.0</h2>
+    <div class="table-wrap" style="border:none">
+      <table>
+        <thead>
+          <tr>
+            <th>Stat type</th>
+            <th class="r">Props</th>
+            <th class="r">MAE</th>
+            <th class="r">RMSE</th>
+            <th class="r">Mean error</th>
+            <th class="r">Hit rate</th>
+            <th class="r">vs break-even</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Receiving yards</td>
+            <td class="r num">386</td><td class="r num">19.8</td><td class="r num">27.1</td>
+            <td class="r num">+1.2</td><td class="r num">55.7%</td>
+            <td class="r edge e-p4">+3.3</td>
+          </tr>
+          <tr>
+            <td>Rushing yards</td>
+            <td class="r num">241</td><td class="r num">21.4</td><td class="r num">29.8</td>
+            <td class="r num">-0.8</td><td class="r num">54.4%</td>
+            <td class="r edge e-p3">+2.0</td>
+          </tr>
+          <tr>
+            <td>Receptions</td>
+            <td class="r num">352</td><td class="r num">1.31</td><td class="r num">1.84</td>
+            <td class="r num">+0.06</td><td class="r num">53.1%</td>
+            <td class="r edge e-p2">+0.7</td>
+          </tr>
+          <tr>
+            <td>Passing yards</td>
+            <td class="r num">168</td><td class="r num">34.2</td><td class="r num">44.6</td>
+            <td class="r num">+2.4</td><td class="r num">51.8%</td>
+            <td class="r edge e-n2">-0.6</td>
+          </tr>
+          <tr>
+            <td>Touchdowns</td>
+            <td class="r num">137</td><td class="r num">0.42</td><td class="r num">0.71</td>
+            <td class="r num">-0.03</td><td class="r num">49.6%</td>
+            <td class="r edge e-n3">-2.8</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="foot">Touchdowns are below break-even, which is expected before the dedicated Poisson model lands. Passing yards is thin at 168 props; treat as noise for now.</p>
+  </div>
+
+  <div class="card">
+    <h2>Model versions</h2>
+    <div class="table-wrap" style="border:none">
+      <table>
+        <thead>
+          <tr>
+            <th>Version</th>
+            <th>Weeks</th>
+            <th class="r">Props</th>
+            <th class="r">MAE</th>
+            <th class="r">Hit rate</th>
+            <th>Change</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">v1.2.0</td><td class="opp">8–10</td>
+            <td class="r num">548</td><td class="r num">18.7</td>
+            <td class="r num" style="color:var(--edge-pos-4)">54.1%</td>
+            <td class="stat-type">Added weather adjustment, retuned matchup multiplier</td>
+          </tr>
+          <tr>
+            <td class="num">v1.1.0</td><td class="opp">6–7</td>
+            <td class="r num">371</td><td class="r num">20.8</td>
+            <td class="r num">52.6%</td>
+            <td class="stat-type">EWMA recency weighting over flat L5 average</td>
+          </tr>
+          <tr>
+            <td class="num">v1.0.0</td><td class="opp">4–5</td>
+            <td class="r num">365</td><td class="r num">23.1</td>
+            <td class="r num" style="color:var(--edge-neg-3)">50.9%</td>
+            <td class="stat-type">Baseline: research priors, no environment layer</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="foot">Hit rate is measured against the closing line, not the line captured at projection time. Beating the close is the real test.</p>
+  </div>
+
+</main>
+
+</body>
+</html>

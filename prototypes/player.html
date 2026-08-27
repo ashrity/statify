@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statify - Puka Nacua</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+  .player-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--gap);
+    padding-bottom: var(--gap);
+    margin-bottom: var(--gap);
+    border-bottom: 1px solid var(--border);
+  }
+  .player-head h1 { font-size: var(--fs-xl); }
+  .player-meta { color: var(--muted); font-family: var(--font-mono); font-size: var(--fs-sm); }
+  .cards.usage { grid-template-columns: repeat(4, 1fr); }
+  .cards.two { grid-template-columns: 2fr 1fr; }
+  .spark-row { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--gap); }
+  .spark-val { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--fs-xl); font-weight: 600; }
+  .trend-up { color: var(--edge-pos-4); font-size: var(--fs-sm); }
+  .trend-down { color: var(--edge-neg-4); font-size: var(--fs-sm); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">stat<span>ify</span></div>
+  <nav class="nav">
+    <a href="index.html">Board</a>
+    <a href="player.html" class="active">Players</a>
+    <a href="accuracy.html">Accuracy</a>
+  </nav>
+  <div class="topbar-right">
+    <span class="num">2025 · WK 11</span>
+    <span>model v1.2.0</span>
+  </div>
+</header>
+
+<main class="page">
+
+  <div class="player-head">
+    <h1>Puka Nacua</h1>
+    <span class="player-meta">WR · LAR · #17</span>
+    <span class="player-meta">@ SEA · Sun 4:05 · outdoor · 8mph wind</span>
+    <span class="player-meta" style="margin-left:auto">9 games · 2025</span>
+  </div>
+
+  <!-- usage: the opportunity half of the projection -->
+  <div class="cards usage">
+    <div class="card">
+      <h2>Target share</h2>
+      <div class="spark-row">
+        <div>
+          <div class="spark-val">28.4%</div>
+          <div class="trend-up">▲ 3.1 vs L5</div>
+        </div>
+        <svg class="chart" viewBox="0 0 120 32" width="120" height="32" preserveAspectRatio="none">
+          <polyline class="spark" points="0,24 15,20 30,22 45,14 60,17 75,11 90,9 105,12 120,6"/>
+        </svg>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Snap share</h2>
+      <div class="spark-row">
+        <div>
+          <div class="spark-val">91.2%</div>
+          <div class="trend-up">▲ 1.4 vs L5</div>
+        </div>
+        <svg class="chart" viewBox="0 0 120 32" width="120" height="32" preserveAspectRatio="none">
+          <polyline class="spark" points="0,12 15,10 30,11 45,8 60,9 75,7 90,6 105,7 120,5"/>
+        </svg>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Routes / game</h2>
+      <div class="spark-row">
+        <div>
+          <div class="spark-val">34.1</div>
+          <div class="trend-down">▼ 1.8 vs L5</div>
+        </div>
+        <svg class="chart" viewBox="0 0 120 32" width="120" height="32" preserveAspectRatio="none">
+          <polyline class="spark" points="0,8 15,10 30,7 45,9 60,12 75,10 90,14 105,13 120,16"/>
+        </svg>
+      </div>
+    </div>
+    <div class="card">
+      <h2>aDOT</h2>
+      <div class="spark-row">
+        <div>
+          <div class="spark-val">9.8</div>
+          <div class="trend-up">▲ 0.6 vs L5</div>
+        </div>
+        <svg class="chart" viewBox="0 0 120 32" width="120" height="32" preserveAspectRatio="none">
+          <polyline class="spark" points="0,20 15,22 30,18 45,19 60,15 75,17 90,13 105,14 120,11"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="cards two">
+
+    <!-- this week's projection, decomposed -->
+    <div class="card">
+      <h2>Week 11 projection · REC YDS</h2>
+      <div style="display:flex;align-items:baseline;gap:var(--gap-lg);margin-bottom:var(--gap)">
+        <div>
+          <div class="stat">86.4</div>
+          <div class="stat-sub">projection</div>
+        </div>
+        <div>
+          <div class="stat" style="color:var(--muted)">72.5</div>
+          <div class="stat-sub">market line</div>
+        </div>
+        <div>
+          <div class="stat e-p5">+13.9</div>
+          <div class="stat-sub">edge</div>
+        </div>
+        <div>
+          <div class="stat" style="color:var(--muted)">0.71</div>
+          <div class="stat-sub">confidence</div>
+        </div>
+      </div>
+      <dl style="margin:0">
+        <div class="kv"><dt>Expected routes</dt><dd>35.2</dd></div>
+        <div class="kv"><dt>Expected targets</dt><dd>9.8</dd></div>
+        <div class="kv"><dt>Yards per route run (L5, weighted)</dt><dd>2.41</dd></div>
+        <div class="kv"><dt>Baseline (opportunity × efficiency)</dt><dd>84.9</dd></div>
+        <div class="kv"><dt>Matchup multiplier · SEA vs WR</dt><dd style="color:var(--edge-pos-4)">×1.06</dd></div>
+        <div class="kv"><dt>Environment · implied total 24.8, pace 4th</dt><dd style="color:var(--edge-pos-3)">×1.02</dd></div>
+        <div class="kv"><dt>Weather · 8mph wind, no precip</dt><dd style="color:var(--muted)">×1.00</dd></div>
+      </dl>
+      <p class="foot">SEA allows the 4th-most EPA per target to perimeter WRs. Matchup is doing most of the work above baseline.</p>
+    </div>
+
+    <!-- the market side -->
+    <div class="card">
+      <h2>Line across books</h2>
+      <table>
+        <thead>
+          <tr><th>Book</th><th class="r">Line</th><th class="r">Over</th><th class="r">Under</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="book">DK</td><td class="r num">72.5</td><td class="r num">-114</td><td class="r num">-106</td></tr>
+          <tr><td class="book">FD</td><td class="r num">73.5</td><td class="r num">-110</td><td class="r num">-110</td></tr>
+          <tr><td class="book">MGM</td><td class="r num">72.5</td><td class="r num">-118</td><td class="r num">-104</td></tr>
+          <tr><td class="book">CZR</td><td class="r num">74.5</td><td class="r num">-105</td><td class="r num">-115</td></tr>
+        </tbody>
+      </table>
+      <p class="foot">Opened 70.5 at DK on Tue. Moved +2.0 through the week.</p>
+    </div>
+
+  </div>
+
+  <!-- the results loop: was the model right before? -->
+  <div class="card">
+    <h2>Projection history · REC YDS</h2>
+    <div class="table-wrap" style="border:none">
+      <table>
+        <thead>
+          <tr>
+            <th class="r">Wk</th>
+            <th>Opp</th>
+            <th class="r">Proj</th>
+            <th class="r">Line</th>
+            <th class="r">Edge</th>
+            <th class="r">Actual</th>
+            <th class="r">Error</th>
+            <th class="r">Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="r num">10</td><td class="opp">vs NE</td>
+            <td class="r num">79.2</td><td class="r num">68.5</td>
+            <td class="edge e-p4">+10.7</td>
+            <td class="r num">94</td><td class="r num">+14.8</td>
+            <td class="r hit">HIT</td>
+          </tr>
+          <tr>
+            <td class="r num">9</td><td class="opp">@SF</td>
+            <td class="r num">71.4</td><td class="r num">74.5</td>
+            <td class="edge e-n2">-3.1</td>
+            <td class="r num">52</td><td class="r num">-19.4</td>
+            <td class="r hit">HIT</td>
+          </tr>
+          <tr>
+            <td class="r num">8</td><td class="opp">vs SEA</td>
+            <td class="r num">84.1</td><td class="r num">77.5</td>
+            <td class="edge e-p3">+6.6</td>
+            <td class="r num">61</td><td class="r num">-23.1</td>
+            <td class="r miss">MISS</td>
+          </tr>
+          <tr>
+            <td class="r num">7</td><td class="opp">@MIN</td>
+            <td class="r num">66.8</td><td class="r num">65.5</td>
+            <td class="edge e-p1">+1.3</td>
+            <td class="r num">88</td><td class="r num">+21.2</td>
+            <td class="r hit">HIT</td>
+          </tr>
+          <tr>
+            <td class="r num">6</td><td class="opp">vs ARI</td>
+            <td class="r num">75.5</td><td class="r num">71.5</td>
+            <td class="edge e-p2">+4.0</td>
+            <td class="r num">45</td><td class="r num">-30.5</td>
+            <td class="r miss">MISS</td>
+          </tr>
+          <tr>
+            <td class="r num">5</td><td class="opp">@GB</td>
+            <td class="r num">81.9</td><td class="r num">73.5</td>
+            <td class="edge e-p4">+8.4</td>
+            <td class="r num">102</td><td class="r num">+20.1</td>
+            <td class="r hit">HIT</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="foot">6 graded · 4 hits · MAE 21.5 · mean error +2.0 (slight under-projection bias)</p>
+  </div>
+
+</main>
+
+</body>
+</html>
