@@ -49,3 +49,15 @@ Thumbs.db
 .claude/
 blueprint/
 CLAUDE.md
+
+# python pipeline
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# local database
+/data/
+
+# .env* above would swallow the template; keep it tracked
+!.env.example

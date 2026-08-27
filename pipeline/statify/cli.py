@@ -1,0 +1,129 @@
+"""Command line entry point for the pipeline."""
+
+from __future__ import annotations
+
+import argparse
+from collections.abc import Sequence
+
+from statify import migrate as migrations
+from statify.config import settings
+from statify.db import connection
+from statify.ingest import reference
+
+
+def _cmd_migrate(_args: argparse.Namespace) -> int:
+    with connection() as conn:
+        applied = migrations.migrate(conn)
+
+    noun = "migration" if len(applied) == 1 else "migrations"
+    print(f"{len(applied)} {noun} applied")
+    for version in applied:
+        print(f"  {version}")
+    return 0
+
+
+def _cmd_ingest_teams(_args: argparse.Namespace) -> int:
+    with connection() as conn:
+        upserted, skipped = reference.load_teams(conn)
+
+    print(f"{upserted} teams upserted ({skipped} historical abbreviations skipped)")
+    return 0
+
+
+def _cmd_ingest_games(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        upserted, skipped = reference.load_games(conn, args.season)
+
+    print(f"{upserted} games upserted ({skipped} without a kickoff time skipped)")
+    return 0
+
+
+def _cmd_ingest_players(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        upserted, skipped = reference.load_players(conn, args.season)
+
+    print(f"{upserted} skill-position players upserted ({skipped} without a GSIS id skipped)")
+    return 0
+
+
+def _format_size(num_bytes: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if num_bytes < 1024 or unit == "GB":
+            return f"{num_bytes:.0f} {unit}" if unit == "B" else f"{num_bytes:.1f} {unit}"
+        num_bytes /= 1024
+    return f"{num_bytes:.1f} GB"
+
+
+def _cmd_status(_args: argparse.Namespace) -> int:
+    path = settings.db_path
+    print(f"database   {path}")
+    if not path.exists():
+        print("           not created yet - run: statify migrate")
+        return 1
+
+    print(f"size       {_format_size(path.stat().st_size)}")
+
+    with connection() as conn:
+        applied = conn.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()
+        print(f"migration  {applied['version']} (applied {applied['applied_at']})" if applied else "migration  none applied")
+
+        # Read the table list from the schema rather than hardcoding it, so later
+        # features show up here without touching this command.
+        tables = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%' AND name != 'schema_migrations' "
+                "ORDER BY name"
+            )
+        ]
+        if not tables:
+            print()
+            print("no data tables yet")
+            return 0
+
+        print()
+        width = max(len(name) for name in tables)
+        for name in tables:
+            count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+            print(f"{name:<{width}}  {count:>7,}")
+
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="statify", description="Statify data pipeline")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    migrate_cmd = subcommands.add_parser("migrate", help="apply pending schema migrations")
+    migrate_cmd.set_defaults(func=_cmd_migrate)
+
+    ingest_cmd = subcommands.add_parser("ingest", help="pull reference data from nflverse")
+    datasets = ingest_cmd.add_subparsers(dest="dataset", required=True)
+
+    teams_cmd = datasets.add_parser("teams", help="load the active NFL teams")
+    teams_cmd.set_defaults(func=_cmd_ingest_teams)
+
+    games_cmd = datasets.add_parser("games", help="load one season's schedule")
+    games_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
+    games_cmd.set_defaults(func=_cmd_ingest_games)
+
+    players_cmd = datasets.add_parser("players", help="load one season's skill-position players")
+    players_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
+    players_cmd.set_defaults(func=_cmd_ingest_players)
+
+    status_cmd = subcommands.add_parser("status", help="show database location and row counts")
+    status_cmd.set_defaults(func=_cmd_status)
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
