@@ -183,3 +183,37 @@ def load_players(conn: sqlite3.Connection, season: int) -> tuple[int, int, int]:
     _write(conn, PLAYERS_UPSERT, rows)
     written = conn.total_changes - before
     return written, skipped, len(rows) - written
+
+
+# Deliberately not part of PLAYERS_UPSERT: that statement is guarded by
+# roster_season so an old backfill cannot rewrite a current team, and pfr_id is
+# identity rather than roster state. Running it through the guard would leave the
+# id NULL on every row already stamped with a newer season.
+PLAYER_PFR_ID_UPDATE = """
+UPDATE players SET pfr_id = :pfr_id, updated_at = :updated_at
+WHERE player_id = :player_id AND (pfr_id IS NULL OR pfr_id <> :pfr_id)
+"""
+
+
+def load_player_ids(conn: sqlite3.Connection) -> tuple[int, int]:
+    """Fill pfr_id for players already in the table. Returns (updated, still_missing).
+
+    The master table is all-time and much larger than our roster, so this walks
+    it once and keeps only the ids we can actually use.
+    """
+    known = {row[0] for row in conn.execute("SELECT player_id FROM players")}
+    updated_at = _utc_now()
+
+    frame = nflverse.players_master().select(["gsis_id", "pfr_id"])
+    rows = [
+        {"player_id": source["gsis_id"], "pfr_id": source["pfr_id"], "updated_at": updated_at}
+        for source in frame.iter_rows(named=True)
+        if source["gsis_id"] in known and source["pfr_id"]
+    ]
+
+    before = conn.total_changes
+    _write(conn, PLAYER_PFR_ID_UPDATE, rows)
+    updated = conn.total_changes - before
+
+    missing = conn.execute("SELECT COUNT(*) FROM players WHERE pfr_id IS NULL").fetchone()[0]
+    return updated, missing

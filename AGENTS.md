@@ -42,11 +42,16 @@ Data pipeline, all run from `pipeline/`:
 - Weekly box-score actuals: `uv run statify ingest weekly --season <year> [--week <n>]`
 - Red zone touches from play-by-play: `uv run statify ingest redzone --season <year> [--week <n>]`
 - Next Gen Stats: `uv run statify ingest ngs --season <year> [--week <n>]` (2016 or later)
+- Snap counts: `uv run statify ingest snaps --season <year> [--week <n>]`
 - Tests: `uv run pytest`
 
 Ingest order matters: teams, then games and players for a season, then weekly,
-redzone, and ngs. Each loader updates only the columns it owns, so re-running one
-never wipes another's work.
+redzone, ngs, and snaps. Each loader updates only the columns it owns, so
+re-running one never wipes another's work.
+
+`ingest snaps` also inserts rows for players who took offensive snaps but
+recorded no stat, so run `ingest redzone` after it to fill their red zone
+touches.
 
 Feeds disagree on team abbreviations (Next Gen Stats says `LAR` where the rest say
 `LA`). Inbound rows go through `normalize_team()` in `statify/ingest/common.py`;

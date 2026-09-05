@@ -71,3 +71,21 @@ def next_gen_stats(season: int, stat_type: str) -> pl.DataFrame:
         seasons=[season],
         stat_type=stat_type,
     )
+
+
+def players_master() -> pl.DataFrame:
+    """Every player nflverse knows, with the cross-source id columns.
+
+    Distinct from rosters(), which is one season's active players. This is the
+    all-time table, and the only place gsis_id and pfr_id sit side by side.
+    """
+    return _pull("players_master", nfl.load_players)
+
+
+def snap_counts(season: int) -> pl.DataFrame:
+    """Per-player per-game snap counts, from Pro Football Reference.
+
+    Keyed by pfr_player_id with no GSIS column, which is why players carries
+    pfr_id.
+    """
+    return _pull("snap_counts", nfl.load_snap_counts, seasons=[season])

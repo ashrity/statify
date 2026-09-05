@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from statify import migrate as migrations
 from statify.config import settings
 from statify.db import connection
-from statify.ingest import ngs, reference, weekly
+from statify.ingest import ngs, reference, snaps, weekly
 
 
 def _cmd_migrate(_args: argparse.Namespace) -> int:
@@ -41,10 +41,12 @@ def _cmd_ingest_games(args: argparse.Namespace) -> int:
 def _cmd_ingest_players(args: argparse.Namespace) -> int:
     with connection() as conn:
         written, no_id, kept_newer = reference.load_players(conn, args.season)
+        pfr_updated, pfr_missing = reference.load_player_ids(conn)
 
     print(f"{written} skill-position players written ({no_id} without a GSIS id skipped)")
     if kept_newer:
         print(f"{kept_newer} left alone, already carrying a roster season newer than {args.season}")
+    print(f"{pfr_updated} pfr ids set ({pfr_missing} players still without one)")
     return 0
 
 
@@ -82,6 +84,20 @@ def _cmd_ingest_ngs(args: argparse.Namespace) -> int:
         for name, load in feeds.items():
             upserted, skipped = load(conn, args.season, args.week)
             print(f"  {name:<10} {upserted:>5} upserted ({skipped} skipped)")
+    return 0
+
+
+def _cmd_ingest_snaps(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        updated, inserted, unresolved, st_only = snaps.load_snap_counts(
+            conn, args.season, args.week
+        )
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{updated} weekly_actuals rows given snap counts for {args.season} {scope}")
+    print(f"{inserted} rows inserted for players who played but recorded no stat")
+    print(f"{st_only} skipped as special teams only (no offensive snaps)")
+    print(f"{unresolved} snap rows unresolved (player not in the players table)")
     return 0
 
 
@@ -167,6 +183,11 @@ def build_parser() -> argparse.ArgumentParser:
     ngs_cmd.add_argument("--season", type=int, required=True, help="season year, 2016 or later")
     ngs_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     ngs_cmd.set_defaults(func=_cmd_ingest_ngs)
+
+    snaps_cmd = datasets.add_parser("snaps", help="fill snaps and snap share from snap counts")
+    snaps_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
+    snaps_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    snaps_cmd.set_defaults(func=_cmd_ingest_snaps)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)
