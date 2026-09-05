@@ -40,9 +40,11 @@ def _cmd_ingest_games(args: argparse.Namespace) -> int:
 
 def _cmd_ingest_players(args: argparse.Namespace) -> int:
     with connection() as conn:
-        upserted, skipped = reference.load_players(conn, args.season)
+        written, no_id, kept_newer = reference.load_players(conn, args.season)
 
-    print(f"{upserted} skill-position players upserted ({skipped} without a GSIS id skipped)")
+    print(f"{written} skill-position players written ({no_id} without a GSIS id skipped)")
+    if kept_newer:
+        print(f"{kept_newer} left alone, already carrying a roster season newer than {args.season}")
     return 0
 
 

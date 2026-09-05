@@ -1,0 +1,11 @@
+-- Which season's roster last set this row's name, position, and team.
+--
+-- players.team_abbr means "current team", but load_players() took it from
+-- whichever season was being ingested and overwrote unconditionally. Backfilling
+-- an old season after the current one therefore rewrote 284 of the 726 players
+-- who appear on both the 2024 and 2025 rosters, silently. Stamping the source
+-- season lets the upsert refuse to move a row backwards in time.
+--
+-- Nullable, and existing rows stay NULL: their provenance is genuinely unknown,
+-- so the upsert treats NULL as older than any pull.
+ALTER TABLE players ADD COLUMN roster_season INTEGER;

@@ -126,19 +126,33 @@ def load_games(conn: sqlite3.Connection, season: int) -> tuple[int, int]:
     return len(rows), skipped
 
 
+# The WHERE clause is the point: it guards only the conflict path, so a backfill
+# still inserts players who have since retired (weekly_actuals has a foreign key
+# here), but never drags an existing row back to an older season's team.
+# >= rather than > so re-pulling the current season still picks up a midseason
+# trade. COALESCE because rows written before migration 004 carry NULL, and NULL
+# loses every comparison, which would freeze them forever.
 PLAYERS_UPSERT = """
-INSERT INTO players (player_id, name, position, team_abbr, updated_at)
-VALUES (:player_id, :name, :position, :team_abbr, :updated_at)
+INSERT INTO players (player_id, name, position, team_abbr, roster_season, updated_at)
+VALUES (:player_id, :name, :position, :team_abbr, :roster_season, :updated_at)
 ON CONFLICT(player_id) DO UPDATE SET
   name = excluded.name,
   position = excluded.position,
   team_abbr = excluded.team_abbr,
+  roster_season = excluded.roster_season,
   updated_at = excluded.updated_at
+WHERE excluded.roster_season >= COALESCE(players.roster_season, 0)
 """
 
 
-def load_players(conn: sqlite3.Connection, season: int) -> tuple[int, int]:
-    """Upsert one season's skill-position players. Returns (upserted, skipped)."""
+def load_players(conn: sqlite3.Connection, season: int) -> tuple[int, int, int]:
+    """Upsert one season's skill-position players.
+
+    Returns (written, no_gsis_id, kept_newer). The guard on PLAYERS_UPSERT means
+    rows sent is not rows changed, so the count comes from total_changes rather
+    than len(rows), which would overstate a backfill by every player already
+    carrying a more recent roster season.
+    """
     frame = nflverse.rosters(season)
     updated_at = _utc_now()
 
@@ -160,9 +174,12 @@ def load_players(conn: sqlite3.Connection, season: int) -> tuple[int, int]:
                 "name": source["full_name"],
                 "position": source["position"],
                 "team_abbr": source["team"],
+                "roster_season": season,
                 "updated_at": updated_at,
             }
         )
 
+    before = conn.total_changes
     _write(conn, PLAYERS_UPSERT, rows)
-    return len(rows), skipped
+    written = conn.total_changes - before
+    return written, skipped, len(rows) - written
