@@ -15,21 +15,36 @@ Statify.
 | Area | Choice |
 | --- | --- |
 | Framework | Next.js 16 (App Router) |
-| Language | TypeScript 5, strict mode |
+| Language | TypeScript 5, strict mode (app); Python 3.12+ (`pipeline/`) |
 | UI | React 19 |
 | Styling | Tailwind CSS v4 (CSS-first config in `app/globals.css`) |
 | Lint | ESLint 9 flat config (`eslint.config.mjs`), `eslint-config-next` |
-| Package manager | npm (`package-lock.json`) |
-| Database | > TODO: none installed yet |
+| Package manager | npm (`package-lock.json`) for the app, `uv` for `pipeline/` |
+| Database | SQLite at `data/statify.db`, numbered SQL migrations in `pipeline/migrations/` |
 | Auth | > TODO: none installed yet |
 | Tests | none installed yet |
 
 ## Commands
 
+App:
+
 - Dev server: `npm run dev` (http://localhost:3000)
 - Build: `npm run build`
 - Production server: `npm run start`
 - Lint: `npm run lint`
+
+Data pipeline, all run from `pipeline/`:
+
+- Apply schema migrations: `uv run statify migrate`
+- Database location and row counts: `uv run statify status`
+- Reference data: `uv run statify ingest teams`, `... ingest games --season <year>`,
+  `... ingest players --season <year>`
+- Weekly box-score actuals: `uv run statify ingest weekly --season <year> [--week <n>]`
+- Red zone touches from play-by-play: `uv run statify ingest redzone --season <year> [--week <n>]`
+
+Ingest order matters: teams, then games and players for a season, then weekly, then
+redzone. Each loader updates only the columns it owns, so re-running one never wipes
+another's work.
 
 No test command is configured, so there is no required test gate yet. There is
 no combined `Verify` command and no automatic GitHub checks. Until one exists,
@@ -60,3 +75,13 @@ no combined `Verify` command and no automatic GitHub checks. Until one exists,
 - Do not add features that were not asked for, and do not refactor unrelated
   code.
 - Verify UI behavior by running the app, not by reading the code and assuming.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

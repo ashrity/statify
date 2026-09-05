@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from statify.ingest.common import utc_now as _utc_now, write as _write
 from statify.sources import nflverse
 
 # load_teams() carries 36 rows: the 32 active franchises plus retired aliases that
@@ -34,20 +35,6 @@ ON CONFLICT(team_abbr) DO UPDATE SET
   name = excluded.name,
   updated_at = excluded.updated_at
 """
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def _write(conn: sqlite3.Connection, statement: str, rows: list[dict]) -> None:
-    conn.execute("BEGIN")
-    try:
-        conn.executemany(statement, rows)
-        conn.execute("COMMIT")
-    except sqlite3.Error:
-        conn.execute("ROLLBACK")
-        raise
 
 
 def load_teams(conn: sqlite3.Connection) -> tuple[int, int]:

@@ -33,3 +33,22 @@ def schedules(season: int) -> pl.DataFrame:
 
 def rosters(season: int) -> pl.DataFrame:
     return _pull("rosters", nfl.load_rosters, seasons=[season])
+
+
+def player_stats(season: int) -> pl.DataFrame:
+    """Weekly per-player box-score stats. Carries game_id, so no schedule join is needed."""
+    return _pull(
+        "player_stats",
+        nfl.load_player_stats,
+        seasons=[season],
+        summary_level="week",
+    )
+
+
+def pbp(season: int, columns: list[str]) -> pl.DataFrame:
+    """Play-by-play, narrowed on arrival.
+
+    A season is roughly 49k rows by 372 columns, and nothing downstream wants the
+    other 360, so the projection happens here rather than in the caller.
+    """
+    return _pull("pbp", nfl.load_pbp, seasons=[season]).select(columns)
