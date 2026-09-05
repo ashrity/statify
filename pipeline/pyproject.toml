@@ -12,6 +12,15 @@ dependencies = [
 [project.scripts]
 statify = "statify.cli:main"
 
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+# Tests live next to the code they cover, so collection follows the *_test.py
+# suffix rather than a separate tests/ tree.
+python_files = ["*_test.py"]
+testpaths = ["statify"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

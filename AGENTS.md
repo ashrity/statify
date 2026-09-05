@@ -22,7 +22,7 @@ Statify.
 | Package manager | npm (`package-lock.json`) for the app, `uv` for `pipeline/` |
 | Database | SQLite at `data/statify.db`, numbered SQL migrations in `pipeline/migrations/` |
 | Auth | > TODO: none installed yet |
-| Tests | none installed yet |
+| Tests | pytest, in `pipeline/` only. The Next.js app has no runner. |
 
 ## Commands
 
@@ -41,14 +41,25 @@ Data pipeline, all run from `pipeline/`:
   `... ingest players --season <year>`
 - Weekly box-score actuals: `uv run statify ingest weekly --season <year> [--week <n>]`
 - Red zone touches from play-by-play: `uv run statify ingest redzone --season <year> [--week <n>]`
+- Next Gen Stats: `uv run statify ingest ngs --season <year> [--week <n>]` (2016 or later)
+- Tests: `uv run pytest`
 
-Ingest order matters: teams, then games and players for a season, then weekly, then
-redzone. Each loader updates only the columns it owns, so re-running one never wipes
-another's work.
+Ingest order matters: teams, then games and players for a season, then weekly,
+redzone, and ngs. Each loader updates only the columns it owns, so re-running one
+never wipes another's work.
 
-No test command is configured, so there is no required test gate yet. There is
-no combined `Verify` command and no automatic GitHub checks. Until one exists,
-`npm run build` plus `npm run lint` are the automated evidence for a change.
+Feeds disagree on team abbreviations (Next Gen Stats says `LAR` where the rest say
+`LA`). Inbound rows go through `normalize_team()` in `statify/ingest/common.py`;
+add aliases there, not per-loader.
+
+`uv run pytest` (from `pipeline/`) is the test command, so the testing gate in
+`blueprint/context/coding-standards.md` is on: a step that adds pure logic ships a
+passing test in the same diff. It covers the Python pipeline only; the Next.js app
+has no runner, and UI work still rides on build output and observed behavior.
+
+There is no combined `Verify` command and no automatic GitHub checks. Until one
+exists, `uv run pytest` plus `npm run build` and `npm run lint` are the automated
+evidence for a change.
 
 ## Conventions
 

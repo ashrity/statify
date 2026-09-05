@@ -10,10 +10,13 @@ from statify.ingest.common import utc_now as _utc_now, write as _write
 from statify.sources import nflverse
 
 # load_teams() carries 36 rows: the 32 active franchises plus retired aliases that
-# share a team_id with a current one. Every actual data table (schedules, rosters,
-# player_stats) spells the Rams LA, the Raiders LV, and the Chargers LAC, so those
-# are the rows to keep and these are the ones to drop. A pre-2016 season would need
-# STL restored, and a pre-2020 season OAK and SD.
+# share a team_id with a current one. schedules, rosters, and player_stats spell
+# the Rams LA, the Raiders LV, and the Chargers LAC, so those are the rows to keep
+# and these are the ones to drop. A pre-2016 season would need STL restored, and a
+# pre-2020 season OAK and SD.
+#
+# Not every feed agrees: Next Gen Stats says LAR. Inbound rows go through
+# normalize_team() in common.py rather than widening this table.
 HISTORICAL_TEAM_ABBRS = frozenset({"LAR", "STL", "OAK", "SD"})
 
 # nflverse normalizes every kickoff to Eastern clock time regardless of where the

@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from statify import migrate as migrations
 from statify.config import settings
 from statify.db import connection
-from statify.ingest import reference, weekly
+from statify.ingest import ngs, reference, weekly
 
 
 def _cmd_migrate(_args: argparse.Namespace) -> int:
@@ -64,6 +64,22 @@ def _cmd_ingest_redzone(args: argparse.Namespace) -> int:
     print(f"{games} games scanned for {args.season} {scope}")
     print(f"{updated} players given red zone touches (others set to 0)")
     print(f"{unmatched} player/game pairs with no weekly_actuals row (non-skill players)")
+    return 0
+
+
+def _cmd_ingest_ngs(args: argparse.Namespace) -> int:
+    feeds = {
+        "receiving": ngs.load_receiving,
+        "passing": ngs.load_passing,
+        "rushing": ngs.load_rushing,
+    }
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"Next Gen Stats for {args.season} {scope}")
+
+    with connection() as conn:
+        for name, load in feeds.items():
+            upserted, skipped = load(conn, args.season, args.week)
+            print(f"  {name:<10} {upserted:>5} upserted ({skipped} skipped)")
     return 0
 
 
@@ -144,6 +160,11 @@ def build_parser() -> argparse.ArgumentParser:
     redzone_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
     redzone_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     redzone_cmd.set_defaults(func=_cmd_ingest_redzone)
+
+    ngs_cmd = datasets.add_parser("ngs", help="load one season's Next Gen Stats")
+    ngs_cmd.add_argument("--season", type=int, required=True, help="season year, 2016 or later")
+    ngs_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    ngs_cmd.set_defaults(func=_cmd_ingest_ngs)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)

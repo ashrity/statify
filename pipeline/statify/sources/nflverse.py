@@ -52,3 +52,22 @@ def pbp(season: int, columns: list[str]) -> pl.DataFrame:
     other 360, so the projection happens here rather than in the caller.
     """
     return _pull("pbp", nfl.load_pbp, seasons=[season]).select(columns)
+
+
+# Next Gen Stats is tracking data, which the league only publishes from 2016.
+NGS_FIRST_SEASON = 2016
+
+
+def next_gen_stats(season: int, stat_type: str) -> pl.DataFrame:
+    """One NGS feed for one season. stat_type is passing, receiving, or rushing."""
+    if season < NGS_FIRST_SEASON:
+        raise RuntimeError(
+            f"Next Gen Stats begins in {NGS_FIRST_SEASON}; {season} has none. "
+            "Player tracking was not published before then."
+        )
+    return _pull(
+        f"next_gen_stats {stat_type}",
+        nfl.load_nextgen_stats,
+        seasons=[season],
+        stat_type=stat_type,
+    )
