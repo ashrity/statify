@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from statify import migrate as migrations
 from statify.config import settings
 from statify.db import connection
-from statify.ingest import depth, injuries, ngs, reference, snaps, weekly
+from statify.ingest import depth, injuries, ngs, reference, snaps, weather, weekly
 
 
 def _cmd_migrate(_args: argparse.Namespace) -> int:
@@ -121,6 +121,16 @@ def _cmd_ingest_injuries(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ingest_weather(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        upserted, indoor, no_reading = weather.load_weather(conn, args.season)
+
+    print(f"{upserted} games given weather for {args.season}")
+    print(f"{indoor} indoor games skipped (weather does not apply)")
+    print(f"{no_reading} outdoor games with no upstream reading")
+    return 0
+
+
 def _format_size(num_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024 or unit == "GB":
@@ -218,6 +228,10 @@ def build_parser() -> argparse.ArgumentParser:
     injuries_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
     injuries_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     injuries_cmd.set_defaults(func=_cmd_ingest_injuries)
+
+    weather_cmd = datasets.add_parser("weather", help="load one season's per-game weather")
+    weather_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
+    weather_cmd.set_defaults(func=_cmd_ingest_weather)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)
