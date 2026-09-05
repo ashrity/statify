@@ -94,3 +94,8 @@ def snap_counts(season: int) -> pl.DataFrame:
 def depth_charts(season: int) -> pl.DataFrame:
     """Weekly depth charts. Carries gsis_id directly, so no crosswalk is needed."""
     return _pull("depth_charts", nfl.load_depth_charts, seasons=[season])
+
+
+def injuries(season: int) -> pl.DataFrame:
+    """Weekly injury reports. Carries gsis_id directly."""
+    return _pull("injuries", nfl.load_injuries, seasons=[season])

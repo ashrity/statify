@@ -44,10 +44,11 @@ Data pipeline, all run from `pipeline/`:
 - Next Gen Stats: `uv run statify ingest ngs --season <year> [--week <n>]` (2016 or later)
 - Snap counts: `uv run statify ingest snaps --season <year> [--week <n>]`
 - Depth charts: `uv run statify ingest depth --season <year> [--week <n>]`
+- Injury reports: `uv run statify ingest injuries --season <year> [--week <n>]`
 - Tests: `uv run pytest`
 
 Ingest order matters: teams, then games and players for a season, then weekly,
-redzone, ngs, snaps, and depth. Each loader updates only the columns it owns, so
+redzone, ngs, snaps, depth, and injuries. Each loader updates only the columns it owns, so
 re-running one never wipes another's work.
 
 `ingest snaps` also inserts rows for players who took offensive snaps but

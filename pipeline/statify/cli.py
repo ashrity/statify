@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from statify import migrate as migrations
 from statify.config import settings
 from statify.db import connection
-from statify.ingest import depth, ngs, reference, snaps, weekly
+from statify.ingest import depth, injuries, ngs, reference, snaps, weekly
 
 
 def _cmd_migrate(_args: argparse.Namespace) -> int:
@@ -111,6 +111,16 @@ def _cmd_ingest_depth(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ingest_injuries(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        upserted, skipped = injuries.load_injuries(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{upserted} injury rows upserted for {args.season} {scope}")
+    print(f"{skipped} rows skipped (player not in the players table)")
+    return 0
+
+
 def _format_size(num_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024 or unit == "GB":
@@ -203,6 +213,11 @@ def build_parser() -> argparse.ArgumentParser:
     depth_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
     depth_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     depth_cmd.set_defaults(func=_cmd_ingest_depth)
+
+    injuries_cmd = datasets.add_parser("injuries", help="load one season's injury reports")
+    injuries_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
+    injuries_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    injuries_cmd.set_defaults(func=_cmd_ingest_injuries)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)
