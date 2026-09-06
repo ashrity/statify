@@ -12,6 +12,7 @@ from statify.ingest.common import utc_now, write
 from statify.ingest import (
     defense,
     depth,
+    form,
     injuries,
     ngs,
     props,
@@ -298,6 +299,15 @@ def _cmd_compute_usage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_form(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows, no_history = form.load_form(conn, args.season)
+
+    print(f"{rows} form rows for {args.season}")
+    print(f"{no_history} are a player's first game, with no prior form")
+    return 0
+
+
 def _format_size(num_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024 or unit == "GB":
@@ -431,6 +441,10 @@ def build_parser() -> argparse.ArgumentParser:
     usage_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     usage_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     usage_cmd.set_defaults(func=_cmd_compute_usage)
+
+    form_cmd = computations.add_parser("form", help="trailing usage form entering each week")
+    form_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    form_cmd.set_defaults(func=_cmd_compute_form)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)

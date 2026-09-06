@@ -77,9 +77,15 @@ Computed metrics, derived from data already stored rather than fetched:
 - Offensive pace and PROE: `uv run statify compute tempo --season <year> [--week <n>]`
 - Player usage shares: `uv run statify compute usage --season <year> [--week <n>]`
 
+- Trailing form: `uv run statify compute form --season <year>`
+
 `compute usage` reads `weekly_actuals`, so re-run it after anything that writes
-that table: `ingest weekly`, `ingest snaps`, or `ingest redzone`. Its shares are
-stale until you do.
+that table: `ingest weekly`, `ingest snaps`, or `ingest redzone`. `compute form`
+then reads `player_usage_weekly`, so the order is weekly, redzone and snaps,
+then usage, then form. Each is stale until the one before it has run.
+
+`compute form` takes no `--week`: a week's form is built from every earlier week,
+so the season is the unit.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first. Nothing under `compute` makes
