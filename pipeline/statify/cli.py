@@ -9,7 +9,7 @@ from statify import migrate as migrations
 from statify.config import settings
 from statify.db import connection
 from statify.ingest.common import utc_now, write
-from statify.ingest import depth, injuries, ngs, props, reference, snaps, weather, weekly
+from statify.ingest import defense, depth, injuries, ngs, props, reference, snaps, weather, weekly
 
 
 def _cmd_migrate(_args: argparse.Namespace) -> int:
@@ -252,6 +252,19 @@ def _cmd_ingest_props(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_defense(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows, excluded = defense.load_team_defense(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} team/week/position rows for {args.season} {scope}")
+    total = sum(excluded.values())
+    print(f"{total} plays excluded, with no position to attribute them to:")
+    for reason, count in excluded.most_common():
+        print(f"  {count:>6}  {reason}")
+    return 0
+
+
 def _format_size(num_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024 or unit == "GB":
@@ -367,6 +380,14 @@ def build_parser() -> argparse.ArgumentParser:
     props_ingest_cmd.add_argument("--week", type=int, required=True, help="week to capture")
     props_ingest_cmd.add_argument("--dry-run", action="store_true", help="show cost and exit without spending")
     props_ingest_cmd.set_defaults(func=_cmd_ingest_props)
+
+    compute_cmd = subcommands.add_parser("compute", help="derive metrics from data already stored")
+    computations = compute_cmd.add_subparsers(dest="computation", required=True)
+
+    defense_cmd = computations.add_parser("defense", help="team defense splits by position faced")
+    defense_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    defense_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    defense_cmd.set_defaults(func=_cmd_compute_defense)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)

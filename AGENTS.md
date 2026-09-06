@@ -71,6 +71,14 @@ Feeds disagree on team abbreviations (Next Gen Stats says `LAR` where the rest s
 `LA`). Inbound rows go through `normalize_team()` in `statify/ingest/common.py`;
 add aliases there, not per-loader.
 
+Computed metrics, derived from data already stored rather than fetched:
+
+- Team defense by position: `uv run statify compute defense --season <year> [--week <n>]`
+
+`compute` reads play-by-play and the tables the ingest commands filled, so run
+the relevant `ingest` commands for a season first. Nothing under `compute` makes
+a network request beyond the cached nflverse pull.
+
 `uv run pytest` (from `pipeline/`) is the test command, so the testing gate in
 `blueprint/context/coding-standards.md` is on: a step that adds pure logic ships a
 passing test in the same diff. It covers the Python pipeline only; the Next.js app
