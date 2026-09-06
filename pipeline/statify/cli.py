@@ -18,6 +18,7 @@ from statify.ingest import (
     reference,
     snaps,
     tempo,
+    usage,
     weather,
     weekly,
 )
@@ -286,6 +287,17 @@ def _cmd_compute_tempo(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_usage(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows, no_air_yards = usage.load_usage(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} usage rows for {args.season} {scope}")
+    if no_air_yards:
+        print(f"{no_air_yards} rows in games with no charted air yards (shares stored as NULL)")
+    return 0
+
+
 def _format_size(num_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024 or unit == "GB":
@@ -414,6 +426,11 @@ def build_parser() -> argparse.ArgumentParser:
     tempo_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     tempo_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     tempo_cmd.set_defaults(func=_cmd_compute_tempo)
+
+    usage_cmd = computations.add_parser("usage", help="player share of team opportunity")
+    usage_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    usage_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    usage_cmd.set_defaults(func=_cmd_compute_usage)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)

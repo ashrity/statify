@@ -75,6 +75,11 @@ Computed metrics, derived from data already stored rather than fetched:
 
 - Team defense by position: `uv run statify compute defense --season <year> [--week <n>]`
 - Offensive pace and PROE: `uv run statify compute tempo --season <year> [--week <n>]`
+- Player usage shares: `uv run statify compute usage --season <year> [--week <n>]`
+
+`compute usage` reads `weekly_actuals`, so re-run it after anything that writes
+that table: `ingest weekly`, `ingest snaps`, or `ingest redzone`. Its shares are
+stale until you do.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first. Nothing under `compute` makes
