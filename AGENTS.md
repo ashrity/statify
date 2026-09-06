@@ -46,15 +46,26 @@ Data pipeline, all run from `pipeline/`:
 - Depth charts: `uv run statify ingest depth --season <year> [--week <n>]`
 - Injury reports: `uv run statify ingest injuries --season <year> [--week <n>]`
 - Weather (outdoor games): `uv run statify ingest weather --season <year>`
+- Player prop lines: `uv run statify ingest props --season <year> --week <n> [--dry-run]`
+- Prop identity audit: `uv run statify props audit --season <year> --week <n> [--dry-run]`
 - Tests: `uv run pytest`
 
 Ingest order matters: teams, then games and players for a season, then weekly,
-redzone, ngs, snaps, depth, injuries, and weather. Each loader updates only the columns it owns, so
+redzone, ngs, snaps, depth, injuries, and weather. Prop lines need only teams,
+games and players for the season. Each loader updates only the columns it owns, so
 re-running one never wipes another's work.
 
 `ingest snaps` also inserts rows for players who took offensive snaps but
 recorded no stat, so run `ingest redzone` after it to fill their red zone
 touches.
+
+`ingest props` and `props audit` need `ODDS_API_KEY` in `.env` (gitignored) and
+spend metered credits from The Odds API. Cost is markets times events, measured:
+one week of the four over/under markets is about 64 credits against a 500 a month
+free tier, so **one capture per week fits and two do not**. Both commands take
+`--dry-run` to print the estimate and spend nothing, and both refuse to run if
+the balance would drop below 50. Historical odds are not available on the free
+tier, which blocks features 27 and 28.
 
 Feeds disagree on team abbreviations (Next Gen Stats says `LAR` where the rest say
 `LA`). Inbound rows go through `normalize_team()` in `statify/ingest/common.py`;

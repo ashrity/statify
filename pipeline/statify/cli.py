@@ -8,7 +8,8 @@ from collections.abc import Sequence
 from statify import migrate as migrations
 from statify.config import settings
 from statify.db import connection
-from statify.ingest import depth, injuries, ngs, reference, snaps, weather, weekly
+from statify.ingest.common import utc_now, write
+from statify.ingest import depth, injuries, ngs, props, reference, snaps, weather, weekly
 
 
 def _cmd_migrate(_args: argparse.Namespace) -> int:
@@ -131,6 +132,126 @@ def _cmd_ingest_weather(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_props_audit(args: argparse.Namespace) -> int:
+    """Report how well the odds feed's identities resolve. Writes nothing."""
+    from statify.sources import odds_api
+
+    with connection() as conn:
+        team_abbrs, games, player_index = props.load_reference(conn, args.season)
+
+    events, remaining = odds_api.events()
+    slate = []
+    unresolved_events = []
+    for event in events:
+        resolved = props.resolve_event(event, team_abbrs, games)
+        if resolved is None:
+            unresolved_events.append(f"{event.get('away_team')} @ {event.get('home_team')}")
+        elif resolved[2] == args.week:
+            slate.append((event, resolved))
+
+    markets = sorted(props.MARKET_STAT_TYPES)
+    print(f"season {args.season} week {args.week}")
+    print(f"  {len(slate)} of {len(events)} events resolved to a game for this week")
+    print(f"  {len(unresolved_events)} events could not be resolved at all")
+    print(f"  cost: {len(slate)} events x {len(markets)} markets = {len(slate) * len(markets)} credits")
+    print(f"  credits remaining before: {remaining}")
+    if args.dry_run:
+        print("  dry run, nothing fetched")
+        return 0
+
+    names: list[str] = []
+    with_lines = 0
+    for event, _ in slate:
+        payload, remaining = odds_api.event_odds(event["id"], markets)
+        found = props.outcome_names(payload)
+        # Books post props game by game as kickoff nears, so a slate pulled early
+        # is partly empty. Without this the match rate looks like full coverage.
+        if found:
+            with_lines += 1
+        names.extend(found)
+
+    matched, unmatched, ambiguous = props.resolve_players(names, player_index)
+    distinct = len(set(names))
+    print()
+    print(f"  {with_lines} of {len(slate)} events had lines posted")
+    print(f"  {distinct} distinct player names in the slate")
+    print(f"  {len(matched)} matched, {len(unmatched)} unmatched, {len(ambiguous)} ambiguous")
+    if distinct:
+        print(f"  match rate: {100 * len(matched) / distinct:.1f}%")
+    print(f"  credits remaining after: {remaining}")
+    if ambiguous:
+        print()
+        print("  AMBIGUOUS (refused, would be stored as nothing):")
+        for name in ambiguous:
+            print(f"    {name}")
+    if unmatched:
+        print()
+        print("  UNMATCHED:")
+        for name in unmatched:
+            print(f"    {name}")
+    return 0
+
+
+def _cmd_ingest_props(args: argparse.Namespace) -> int:
+    from statify.sources import odds_api
+
+    with connection() as conn:
+        team_abbrs, games, _ = props.load_reference(conn, args.season)
+
+    events, remaining = odds_api.events()
+    slate = [
+        (event, resolved)
+        for event in events
+        if (resolved := props.resolve_event(event, team_abbrs, games)) is not None
+        and resolved[2] == args.week
+    ]
+    markets = sorted(props.MARKET_STAT_TYPES)
+    estimate = props.estimate_credits(len(slate), len(markets))
+
+    print(f"season {args.season} week {args.week}")
+    print(f"  {len(slate)} events x {len(markets)} markets = {estimate} credits")
+    print(f"  {remaining} credits remaining, floor {props.CREDIT_FLOOR}")
+
+    if args.dry_run:
+        print("  dry run, nothing fetched and nothing written")
+        return 0
+
+    props.assert_within_budget(estimate, remaining)
+
+    with connection() as conn:
+        _, _, player_index = props.load_reference(conn, args.season)
+        latest = props.latest_stored(conn, args.season, args.week)
+        captured_at = utc_now()
+        rows: list[dict] = []
+        all_names: list[str] = []
+        with_lines = 0
+
+        for event, (game_id, season, week) in slate:
+            payload, remaining = odds_api.event_odds(event["id"], markets)
+            names = props.outcome_names(payload)
+            if names:
+                with_lines += 1
+            all_names.extend(names)
+            matched, _, _ = props.resolve_players(names, player_index)
+            rows.extend(props.prop_rows(payload, game_id, season, week, matched, captured_at))
+
+        _, unmatched, ambiguous = props.resolve_players(all_names, player_index)
+        moved = [row for row in rows if props.is_new_capture(row, latest)]
+        write(conn, props.PROP_UPSERT, moved)
+
+    print(f"  {with_lines} of {len(slate)} events had lines posted")
+    print(f"  {len(rows)} lines offered, {len(moved)} written ({len(rows) - len(moved)} unchanged since the last capture)")
+    print(f"  {len(unmatched)} unmatched and {len(ambiguous)} ambiguous names, stored as nothing")
+    print(f"  {remaining} credits remaining")
+    for label, names in (("UNMATCHED", unmatched), ("AMBIGUOUS", ambiguous)):
+        if names:
+            print()
+            print(f"  {label}:")
+            for name in names:
+                print(f"    {name}")
+    return 0
+
+
 def _format_size(num_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024 or unit == "GB":
@@ -232,6 +353,20 @@ def build_parser() -> argparse.ArgumentParser:
     weather_cmd = datasets.add_parser("weather", help="load one season's per-game weather")
     weather_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
     weather_cmd.set_defaults(func=_cmd_ingest_weather)
+
+    props_cmd = subcommands.add_parser("props", help="player prop lines from The Odds API")
+    props_sub = props_cmd.add_subparsers(dest="action", required=True)
+    audit_cmd = props_sub.add_parser("audit", help="report identity match rates without storing")
+    audit_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
+    audit_cmd.add_argument("--week", type=int, required=True, help="week to audit")
+    audit_cmd.add_argument("--dry-run", action="store_true", help="show cost and exit")
+    audit_cmd.set_defaults(func=_cmd_props_audit)
+
+    props_ingest_cmd = datasets.add_parser("props", help="load player prop lines from The Odds API")
+    props_ingest_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
+    props_ingest_cmd.add_argument("--week", type=int, required=True, help="week to capture")
+    props_ingest_cmd.add_argument("--dry-run", action="store_true", help="show cost and exit without spending")
+    props_ingest_cmd.set_defaults(func=_cmd_ingest_props)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)

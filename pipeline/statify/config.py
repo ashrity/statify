@@ -18,6 +18,7 @@ load_dotenv(REPO_ROOT / ".env")
 class Settings:
     repo_root: Path
     db_path: Path
+    odds_api_key: str | None
 
 
 def _resolve_db_path() -> Path:
@@ -27,4 +28,9 @@ def _resolve_db_path() -> Path:
     return REPO_ROOT / "data" / "statify.db"
 
 
-settings = Settings(repo_root=REPO_ROOT, db_path=_resolve_db_path())
+settings = Settings(
+    repo_root=REPO_ROOT,
+    db_path=_resolve_db_path(),
+    # Secret. Never print it, never let it reach an error message or a log line.
+    odds_api_key=os.environ.get("ODDS_API_KEY") or None,
+)
