@@ -1,4 +1,8 @@
 from statify.ingest.form import (
+    VALUE_COLUMNS,
+    decay_weights,
+    ewma_values,
+    form_columns,
     form_row,
     form_rows,
     prior_games,
@@ -156,3 +160,105 @@ def test_each_row_sees_only_its_own_past():
 
 def test_no_history_produces_no_rows():
     assert form_rows("p", 2024, [], UPDATED_AT) == []
+
+
+# --- recency weighting ------------------------------------------------------
+
+
+def test_the_most_recent_game_carries_full_weight():
+    assert decay_weights(1, 3.0) == [1.0]
+    assert decay_weights(4, 3.0)[-1] == 1.0
+
+
+def test_a_game_one_half_life_back_carries_half():
+    """With a half-life of 3, three appearances back is one half-life, not three."""
+    weights = decay_weights(4, 3.0)
+    assert weights[-1] == 1.0     # most recent
+    assert weights[-4] == 0.5     # three appearances back = one half-life
+    assert round(weights[-2], 10) == round(0.5 ** (1 / 3), 10)
+
+
+def test_weights_halve_every_half_life():
+    weights = decay_weights(7, 3.0)
+    assert weights[-1] == 1.0
+    assert round(weights[-4], 10) == 0.5
+    assert round(weights[-7], 10) == 0.25
+
+
+def test_weights_are_ordered_oldest_first():
+    weights = decay_weights(5, 3.0)
+    assert weights == sorted(weights)
+
+
+def test_ewma_weights_the_parts_not_the_ratio():
+    """The trap. Weighting the share instead discards volume.
+
+    Two games at 5/10 and 1/30 with weights 0.5 and 1.0:
+      correct   (0.5*5 + 1*1) / (0.5*10 + 1*30) = 3.5/35   = 0.1
+      incorrect (0.5*0.5 + 1*(1/30)) / 1.5      = 0.2833/1.5 = 0.1889
+    """
+    games = [game(1, targets=5, team_targets=10), game(2, targets=1, team_targets=30)]
+    values = ewma_values(games, half_life=1.0)
+    assert round(values["target_share"], 10) == 0.1
+    assert round(values["target_share"], 4) != 0.1889
+
+
+def test_ewma_leans_toward_the_recent_game():
+    games = [game(1, targets=2, team_targets=20), game(2, targets=10, team_targets=20)]
+    weighted = ewma_values(games, half_life=1.0)["target_share"]
+    unweighted = window_values(games)["target_share"]
+    assert weighted > unweighted
+
+
+def test_ewma_of_a_single_game_is_that_game():
+    values = ewma_values([game(1, targets=5, team_targets=20)], half_life=3.0)
+    assert values["target_share"] == 0.25
+
+
+def test_ewma_per_game_metrics_are_a_weighted_mean():
+    games = [game(1, targets=0), game(2, targets=9)]
+    # weights 0.5 and 1.0 -> (0.5*0 + 1*9) / 1.5 = 6.0
+    assert ewma_values(games, half_life=1.0)["targets_pg"] == 6.0
+
+
+def test_ewma_snap_share_is_a_weighted_mean():
+    games = [game(1, snap_share=0.0), game(2, snap_share=0.9)]
+    assert ewma_values(games, half_life=1.0)["snap_share"] == 0.6
+
+
+def test_ewma_wopr_comes_from_the_weighted_shares():
+    games = [game(1, targets=5, team_targets=10, air_yards=50, team_air_yards=100)]
+    values = ewma_values(games, half_life=3.0)
+    assert values["wopr"] == 1.5 * values["target_share"] + 0.7 * values["air_yards_share"]
+
+
+def test_ewma_of_an_empty_history_is_all_null():
+    assert ewma_values([], half_life=3.0) == dict.fromkeys(VALUE_COLUMNS)
+
+
+def test_ewma_skips_games_missing_a_metric():
+    games = [
+        game(1, red_zone_touches=None, team_red_zone_touches=None),
+        game(2, red_zone_touches=3, team_red_zone_touches=6),
+    ]
+    assert ewma_values(games, half_life=1.0)["rz_touch_share"] == 0.5
+
+
+def test_form_row_records_the_half_life_even_with_no_history():
+    row = form_row("p", 2024, 1, [game(1)], UPDATED_AT)
+    assert row["ewma_half_life"] == 3.0
+    assert row["target_share_ewma"] is None
+
+
+def test_form_row_ewma_uses_only_prior_games():
+    """Reuses prior_games, so a week's own result must not reach its EWMA."""
+    history = [game(1, targets=5, team_targets=20), game(2, targets=20, team_targets=20)]
+    row = form_row("p", 2024, 2, history, UPDATED_AT)
+    assert row["target_share_ewma"] == 0.25
+
+
+def test_form_columns_cover_every_ewma_value():
+    columns = set(form_columns())
+    assert "ewma_half_life" in columns
+    for value in VALUE_COLUMNS:
+        assert f"{value}_ewma" in columns

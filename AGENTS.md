@@ -79,6 +79,11 @@ Computed metrics, derived from data already stored rather than fetched:
 
 - Trailing form: `uv run statify compute form --season <year>`
 
+`compute form` writes both the trailing windows (last 3, last 5, season to date)
+and their exponentially weighted counterparts in one pass, so the two halves of
+a row cannot disagree. The half-life is stored on every row rather than only in
+the code.
+
 `compute usage` reads `weekly_actuals`, so re-run it after anything that writes
 that table: `ingest weekly`, `ingest snaps`, or `ingest redzone`. `compute form`
 then reads `player_usage_weekly`, so the order is weekly, redzone and snaps,
