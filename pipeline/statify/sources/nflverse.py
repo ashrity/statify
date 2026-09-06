@@ -99,3 +99,12 @@ def depth_charts(season: int) -> pl.DataFrame:
 def injuries(season: int) -> pl.DataFrame:
     """Weekly injury reports. Carries gsis_id directly."""
     return _pull("injuries", nfl.load_injuries, seasons=[season])
+
+
+def participation(season: int, columns: list[str]) -> pl.DataFrame:
+    """Who was on the field for each play. Available from 2016.
+
+    Narrowed on arrival like pbp: the frame is 26 columns wide and only three
+    are needed to count routes.
+    """
+    return _pull("participation", nfl.load_participation, seasons=[season]).select(columns)

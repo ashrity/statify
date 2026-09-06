@@ -17,6 +17,7 @@ from statify.ingest import (
     ngs,
     props,
     reference,
+    routes,
     snaps,
     tempo,
     usage,
@@ -308,6 +309,18 @@ def _cmd_compute_form(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ingest_routes(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        updated, players, missing = routes.load_routes(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{updated} weekly_actuals rows given routes for {args.season} {scope}")
+    print(f"{players} players ran at least one route")
+    if missing:
+        print(f"{missing} player/game pairs had routes but no weekly_actuals row")
+    return 0
+
+
 def _format_size(num_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024 or unit == "GB":
@@ -445,6 +458,11 @@ def build_parser() -> argparse.ArgumentParser:
     form_cmd = computations.add_parser("form", help="trailing usage form entering each week")
     form_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     form_cmd.set_defaults(func=_cmd_compute_form)
+
+    routes_cmd = datasets.add_parser("routes", help="count routes run from participation data")
+    routes_cmd.add_argument("--season", type=int, required=True, help="season year, 2016 or later")
+    routes_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    routes_cmd.set_defaults(func=_cmd_ingest_routes)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)

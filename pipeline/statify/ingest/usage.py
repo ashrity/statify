@@ -31,7 +31,15 @@ AIR_YARDS_SHARE_WEIGHT = 0.7
 # players does not store, and it was tried: agreement with nflverse fell from 98%
 # to 89%. nflverse builds its denominator from its own player rows too, so the
 # player sum is the definition the rest of the world is using.
-PBP_COLUMNS = ["game_id", "season_type", "posteam", "pass", "air_yards"]
+PBP_COLUMNS = [
+    "game_id",
+    "season_type",
+    "posteam",
+    "pass",
+    "air_yards",
+    "qb_dropback",
+    "special_teams_play",
+]
 
 USAGE_UPSERT = """
 INSERT INTO player_usage_weekly (
@@ -40,6 +48,7 @@ INSERT INTO player_usage_weekly (
   air_yards, team_air_yards, air_yards_share,
   wopr, adot,
   red_zone_touches, team_red_zone_touches, red_zone_touch_share,
+  routes, team_dropbacks, route_participation, targets_per_route,
   updated_at
 )
 VALUES (
@@ -48,6 +57,7 @@ VALUES (
   :air_yards, :team_air_yards, :air_yards_share,
   :wopr, :adot,
   :red_zone_touches, :team_red_zone_touches, :red_zone_touch_share,
+  :routes, :team_dropbacks, :route_participation, :targets_per_route,
   :updated_at
 )
 ON CONFLICT(player_id, game_id) DO UPDATE SET
@@ -61,6 +71,10 @@ ON CONFLICT(player_id, game_id) DO UPDATE SET
   red_zone_touches = excluded.red_zone_touches,
   team_red_zone_touches = excluded.team_red_zone_touches,
   red_zone_touch_share = excluded.red_zone_touch_share,
+  routes = excluded.routes,
+  team_dropbacks = excluded.team_dropbacks,
+  route_participation = excluded.route_participation,
+  targets_per_route = excluded.targets_per_route,
   targets = excluded.targets,
   updated_at = excluded.updated_at
 """
@@ -99,6 +113,24 @@ def team_air_yards(plays: list[dict]) -> dict[tuple[str, str], int]:
     return totals
 
 
+def team_dropbacks(plays: list[dict]) -> dict[tuple[str, str], int]:
+    """Dropbacks per team per game, the denominator for route participation.
+
+    Matches the rule feature 10b counts routes on, so a participation rate can
+    never exceed 1 through a definition mismatch.
+    """
+    totals: dict[tuple[str, str], int] = defaultdict(int)
+    for play in plays:
+        if (
+            play.get("posteam")
+            and play.get("season_type") in SEASON_TYPES
+            and play.get("qb_dropback") == 1
+            and play.get("special_teams_play") != 1
+        ):
+            totals[(play["posteam"], play["game_id"])] += 1
+    return totals
+
+
 def usage_row(actual: dict, team: dict, updated_at: str) -> dict:
     """One player's shares for one game."""
     target_share = share(actual["targets"], team["targets"])
@@ -120,12 +152,19 @@ def usage_row(actual: dict, team: dict, updated_at: str) -> dict:
         "red_zone_touches": actual["red_zone_touches"],
         "team_red_zone_touches": team["red_zone_touches"],
         "red_zone_touch_share": share(actual["red_zone_touches"], team["red_zone_touches"]),
+        "routes": actual["routes_run"],
+        "team_dropbacks": team["dropbacks"],
+        "route_participation": share(actual["routes_run"], team["dropbacks"]),
+        "targets_per_route": share(actual["targets"], actual["routes_run"]),
         "updated_at": updated_at,
     }
 
 
 def aggregate_usage(
-    actuals: list[dict], air_yards_by_team: dict[tuple[str, str], int], updated_at: str
+    actuals: list[dict],
+    air_yards_by_team: dict[tuple[str, str], int],
+    dropbacks_by_team: dict[tuple[str, str], int],
+    updated_at: str,
 ) -> list[dict]:
     """Turn weekly actuals into usage rows, one per input row."""
     team_totals: dict[tuple[str, str], dict] = defaultdict(
@@ -144,6 +183,7 @@ def aggregate_usage(
         key = (actual["team_abbr"], actual["game_id"])
         team = dict(team_totals[key])
         team["air_yards"] = air_yards_by_team.get(key, 0)
+        team["dropbacks"] = dropbacks_by_team.get(key, 0)
         rows.append(usage_row(actual, team, updated_at))
     return rows
 
@@ -154,7 +194,7 @@ def load_usage(
     """Compute and upsert one season's usage shares. Returns (rows, rows_missing_air_yards)."""
     query = (
         "SELECT player_id, game_id, season, week, team_abbr, targets, air_yards, "
-        "red_zone_touches FROM weekly_actuals WHERE season = ?"
+        "red_zone_touches, routes_run FROM weekly_actuals WHERE season = ?"
     )
     params: tuple = (season,)
     if week is not None:
@@ -163,7 +203,7 @@ def load_usage(
     actuals = [dict(row) for row in conn.execute(query, params)]
 
     plays = list(nflverse.pbp(season, PBP_COLUMNS).iter_rows(named=True))
-    rows = aggregate_usage(actuals, team_air_yards(plays), utc_now())
+    rows = aggregate_usage(actuals, team_air_yards(plays), team_dropbacks(plays), utc_now())
 
     write(conn, USAGE_UPSERT, rows)
     return len(rows), sum(1 for row in rows if not row["team_air_yards"])

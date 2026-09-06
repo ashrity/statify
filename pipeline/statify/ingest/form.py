@@ -22,9 +22,11 @@ WEIGHTED_RATES = {
     "air_yards_share": ("air_yards", "team_air_yards"),
     "adot": ("air_yards", "targets"),
     "rz_touch_share": ("red_zone_touches", "team_red_zone_touches"),
+    "route_participation": ("routes", "team_dropbacks"),
+    "targets_per_route": ("targets", "routes"),
 }
 
-PER_GAME = {"targets_pg": "targets", "carries_pg": "carries"}
+PER_GAME = {"targets_pg": "targets", "carries_pg": "carries", "routes_pg": "routes"}
 
 VALUE_COLUMNS = tuple(PER_GAME) + tuple(WEIGHTED_RATES) + ("wopr", "snap_share")
 
@@ -157,6 +159,7 @@ HISTORY_QUERY = """
 SELECT u.player_id, u.week, u.targets, u.team_targets,
        u.air_yards, u.team_air_yards,
        u.red_zone_touches, u.team_red_zone_touches,
+       u.routes, u.team_dropbacks,
        w.carries, w.snap_share
 FROM player_usage_weekly u
 JOIN weekly_actuals w ON w.player_id = u.player_id AND w.game_id = u.game_id

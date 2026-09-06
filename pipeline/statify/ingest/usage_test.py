@@ -19,6 +19,7 @@ def actual(**overrides):
         "targets": 10,
         "air_yards": 95,
         "red_zone_touches": 3,
+        "routes_run": 30,
     }
     return {**base, **overrides}
 
@@ -97,7 +98,7 @@ def test_team_air_yards_ignores_preseason():
 
 
 def test_usage_row_computes_every_share():
-    team = {"targets": 29, "air_yards": 237, "red_zone_touches": 10}
+    team = {"targets": 29, "air_yards": 237, "red_zone_touches": 10, "dropbacks": 40}
     row = usage_row(actual(), team, UPDATED_AT)
     assert row["target_share"] == 10 / 29
     assert row["air_yards_share"] == 95 / 237
@@ -106,7 +107,7 @@ def test_usage_row_computes_every_share():
 
 
 def test_adot_is_none_without_targets():
-    team = {"targets": 29, "air_yards": 237, "red_zone_touches": 10}
+    team = {"targets": 29, "air_yards": 237, "red_zone_touches": 10, "dropbacks": 40}
     assert usage_row(actual(targets=0, air_yards=0), team, UPDATED_AT)["adot"] is None
 
 
@@ -115,6 +116,7 @@ def test_team_targets_are_summed_from_our_player_rows():
     rows = aggregate_usage(
         [actual(player_id="a", targets=10), actual(player_id="b", targets=30)],
         {("PHI", "2024_01_GB_PHI"): 200},
+        {("PHI", "2024_01_GB_PHI"): 40},
         UPDATED_AT,
     )
     assert {r["team_targets"] for r in rows} == {40}
@@ -126,6 +128,7 @@ def test_a_null_red_zone_count_stays_out_of_the_team_total():
     rows = aggregate_usage(
         [actual(player_id="a", red_zone_touches=3), actual(player_id="b", red_zone_touches=None)],
         {("PHI", "2024_01_GB_PHI"): 200},
+        {("PHI", "2024_01_GB_PHI"): 40},
         UPDATED_AT,
     )
     by_id = {r["player_id"]: r for r in rows}
@@ -137,6 +140,7 @@ def test_separate_games_do_not_share_a_denominator():
     rows = aggregate_usage(
         [actual(game_id="G1", targets=10), actual(game_id="G2", targets=30)],
         {("PHI", "G1"): 100, ("PHI", "G2"): 300},
+        {("PHI", "G1"): 20, ("PHI", "G2"): 60},
         UPDATED_AT,
     )
     assert {r["team_targets"] for r in rows} == {10, 30}
@@ -144,11 +148,11 @@ def test_separate_games_do_not_share_a_denominator():
 
 def test_a_game_with_no_air_yards_yields_null_shares():
     """Better a visible NULL than a share computed against a denominator of zero."""
-    rows = aggregate_usage([actual(targets=0, air_yards=0)], {}, UPDATED_AT)
+    rows = aggregate_usage([actual(targets=0, air_yards=0)], {}, {}, UPDATED_AT)
     assert rows[0]["team_air_yards"] == 0
     assert rows[0]["air_yards_share"] is None
     assert rows[0]["wopr"] is None
 
 
 def test_empty_input():
-    assert aggregate_usage([], {}, UPDATED_AT) == []
+    assert aggregate_usage([], {}, {}, UPDATED_AT) == []

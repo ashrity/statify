@@ -45,6 +45,7 @@ Data pipeline, all run from `pipeline/`:
 - Snap counts: `uv run statify ingest snaps --season <year> [--week <n>]`
 - Depth charts: `uv run statify ingest depth --season <year> [--week <n>]`
 - Injury reports: `uv run statify ingest injuries --season <year> [--week <n>]`
+- Routes run: `uv run statify ingest routes --season <year> [--week <n>]` (2016 or later)
 - Weather (outdoor games): `uv run statify ingest weather --season <year>`
 - Player prop lines: `uv run statify ingest props --season <year> --week <n> [--dry-run]`
 - Prop identity audit: `uv run statify props audit --season <year> --week <n> [--dry-run]`
@@ -84,8 +85,17 @@ and their exponentially weighted counterparts in one pass, so the two halves of
 a row cannot disagree. The half-life is stored on every row rather than only in
 the code.
 
+**Routes are an approximation.** No free source publishes per-player route
+counts, so `ingest routes` counts players on the field for a dropback. A player
+who stayed in to block is counted too, and the error is uneven: measured on
+2024, targets per route lands at 0.197 for receivers against a real figure near
+0.20, but 0.151 for backs against a real figure near 0.20. Running back routes
+are over-counted by roughly a quarter, so yards per route run for a back reads
+about that much low. Migration 015 carries the same warning.
+
 `compute usage` reads `weekly_actuals`, so re-run it after anything that writes
-that table: `ingest weekly`, `ingest snaps`, or `ingest redzone`. `compute form`
+that table: `ingest weekly`, `ingest snaps`, `ingest redzone`, or `ingest
+routes`. `compute form`
 then reads `player_usage_weekly`, so the order is weekly, redzone and snaps,
 then usage, then form. Each is stale until the one before it has run.
 

@@ -14,7 +14,8 @@ UPDATED_AT = "2026-01-01T00:00:00+00:00"
 
 
 def game(week, targets=5, team_targets=30, air_yards=50, team_air_yards=250,
-         carries=0, red_zone_touches=1, team_red_zone_touches=10, snap_share=0.8):
+         carries=0, red_zone_touches=1, team_red_zone_touches=10, snap_share=0.8,
+         routes=30, team_dropbacks=40):
     return {
         "week": week,
         "targets": targets,
@@ -25,6 +26,8 @@ def game(week, targets=5, team_targets=30, air_yards=50, team_air_yards=250,
         "red_zone_touches": red_zone_touches,
         "team_red_zone_touches": team_red_zone_touches,
         "snap_share": snap_share,
+        "routes": routes,
+        "team_dropbacks": team_dropbacks,
     }
 
 
