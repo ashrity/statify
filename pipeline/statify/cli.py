@@ -9,7 +9,18 @@ from statify import migrate as migrations
 from statify.config import settings
 from statify.db import connection
 from statify.ingest.common import utc_now, write
-from statify.ingest import defense, depth, injuries, ngs, props, reference, snaps, weather, weekly
+from statify.ingest import (
+    defense,
+    depth,
+    injuries,
+    ngs,
+    props,
+    reference,
+    snaps,
+    tempo,
+    weather,
+    weekly,
+)
 
 
 def _cmd_migrate(_args: argparse.Namespace) -> int:
@@ -265,6 +276,16 @@ def _cmd_compute_defense(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_tempo(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows, without_neutral = tempo.load_team_tempo(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} team/week tempo rows for {args.season} {scope}")
+    print(f"{without_neutral} rows have no situation-neutral snaps (pace stored as NULL)")
+    return 0
+
+
 def _format_size(num_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024 or unit == "GB":
@@ -388,6 +409,11 @@ def build_parser() -> argparse.ArgumentParser:
     defense_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     defense_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     defense_cmd.set_defaults(func=_cmd_compute_defense)
+
+    tempo_cmd = computations.add_parser("tempo", help="offensive pace and pass rate over expected")
+    tempo_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    tempo_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    tempo_cmd.set_defaults(func=_cmd_compute_tempo)
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)
