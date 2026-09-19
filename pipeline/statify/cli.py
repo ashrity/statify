@@ -12,6 +12,7 @@ from statify.ingest.common import utc_now, write
 from statify.ingest import (
     defense,
     depth,
+    efficiency,
     form,
     injuries,
     ngs,
@@ -300,6 +301,17 @@ def _cmd_compute_usage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} efficiency rows for {args.season} {scope}")
+    if no_routes:
+        print(f"{no_routes} rows have no route count (yprr stored as NULL)")
+    return 0
+
+
 def _cmd_compute_form(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_history = form.load_form(conn, args.season)
@@ -454,6 +466,11 @@ def build_parser() -> argparse.ArgumentParser:
     usage_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     usage_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     usage_cmd.set_defaults(func=_cmd_compute_usage)
+
+    efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
+    efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    efficiency_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    efficiency_cmd.set_defaults(func=_cmd_compute_efficiency)
 
     form_cmd = computations.add_parser("form", help="trailing usage form entering each week")
     form_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")

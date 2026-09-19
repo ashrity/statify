@@ -77,7 +77,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Team defense by position: `uv run statify compute defense --season <year> [--week <n>]`
 - Offensive pace and PROE: `uv run statify compute tempo --season <year> [--week <n>]`
 - Player usage shares: `uv run statify compute usage --season <year> [--week <n>]`
-
+- Player efficiency: `uv run statify compute efficiency --season <year> [--week <n>]`
 - Trailing form: `uv run statify compute form --season <year>`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
@@ -91,13 +91,27 @@ who stayed in to block is counted too, and the error is uneven: measured on
 2024, targets per route lands at 0.197 for receivers against a real figure near
 0.20, but 0.151 for backs against a real figure near 0.20. Running back routes
 are over-counted by roughly a quarter, so yards per route run for a back reads
-about that much low. Migration 015 carries the same warning.
+about that much low. Migrations 015 and 016 carry the same warning. This lands on
+`player_efficiency_weekly.yprr`: treat a receiver's figure as sound (measured on
+2024, Nacua 3.21 and Collins 2.86 against published figures within about 0.1) and
+a back's as a floor rather than an estimate.
+
+`compute efficiency` stores its own `yacoe`, which is **not** the Next Gen Stats
+figure of the same name in `next_gen_stats`. NGS builds it from player tracking;
+this is the nflverse expected-YAC model in play-by-play. Measured over 1,302
+receiver weeks they differ by a mean of 0.95 yards and agree within a yard only
+30% of the time. Both are real. The play-by-play one is computed because NGS
+publishes nothing at all for running back receiving, and because it stores its
+own denominator so it can be weighted by volume across weeks.
 
 `compute usage` reads `weekly_actuals`, so re-run it after anything that writes
 that table: `ingest weekly`, `ingest snaps`, `ingest redzone`, or `ingest
-routes`. `compute form`
-then reads `player_usage_weekly`, so the order is weekly, redzone and snaps,
-then usage, then form. Each is stale until the one before it has run.
+routes`. `compute efficiency` then reads `weekly_actuals` and takes `routes` from
+`player_usage_weekly`, and `compute form` reads `player_usage_weekly`, so the
+order is weekly, redzone and snaps, then usage, then efficiency, then form. Each
+is stale until the one before it has run. `compute efficiency` refuses to run at
+all when the season has weekly actuals but no usage rows, rather than filling
+every `yprr` with NULL and reporting success.
 
 `compute form` takes no `--week`: a week's form is built from every earlier week,
 so the season is the unit.
