@@ -15,6 +15,7 @@ from statify.ingest import (
     efficiency,
     form,
     injuries,
+    matchup,
     ngs,
     props,
     reference,
@@ -272,7 +273,7 @@ def _cmd_compute_defense(args: argparse.Namespace) -> int:
         rows, excluded = defense.load_team_defense(conn, args.season, args.week)
 
     scope = f"week {args.week}" if args.week is not None else "full season"
-    print(f"{rows} team/week/position rows for {args.season} {scope}")
+    print(f"{rows} team/week/position/play-type rows for {args.season} {scope}")
     total = sum(excluded.values())
     print(f"{total} plays excluded, with no position to attribute them to:")
     for reason, count in excluded.most_common():
@@ -309,6 +310,15 @@ def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     print(f"{rows} efficiency rows for {args.season} {scope}")
     if no_routes:
         print(f"{no_routes} rows have no route count (yprr stored as NULL)")
+    return 0
+
+
+def _cmd_compute_matchup(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows, no_prior = matchup.load_matchup(conn, args.season)
+
+    print(f"{rows} team/week/position/play-type matchup rows for {args.season}")
+    print(f"{no_prior} are a defense's first game, with nothing to compare against")
     return 0
 
 
@@ -479,6 +489,10 @@ def build_parser() -> argparse.ArgumentParser:
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     efficiency_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     efficiency_cmd.set_defaults(func=_cmd_compute_efficiency)
+
+    matchup_cmd = computations.add_parser("matchup", help="defense strength relative to league")
+    matchup_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    matchup_cmd.set_defaults(func=_cmd_compute_matchup)
 
     form_cmd = computations.add_parser("form", help="trailing usage form entering each week")
     form_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")

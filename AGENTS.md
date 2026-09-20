@@ -74,7 +74,8 @@ add aliases there, not per-loader.
 
 Computed metrics, derived from data already stored rather than fetched:
 
-- Team defense by position: `uv run statify compute defense --season <year> [--week <n>]`
+- Team defense by position and play type: `uv run statify compute defense --season <year> [--week <n>]`
+- Defensive matchup factors: `uv run statify compute matchup --season <year>`
 - Offensive pace and PROE: `uv run statify compute tempo --season <year> [--week <n>]`
 - Player usage shares: `uv run statify compute usage --season <year> [--week <n>]`
 - Player efficiency: `uv run statify compute efficiency --season <year> [--week <n>]`
@@ -120,12 +121,36 @@ receiver weeks they differ by a mean of 0.95 yards and agree within a yard only
 publishes nothing at all for running back receiving, and because it stores its
 own denominator so it can be weighted by volume across weeks.
 
+**Migration 019 emptied `team_defense_weekly`.** It added a `play_type` column
+to the primary key and no honest value could be invented for the existing rows,
+so they were dropped. Everything in that table is derived from play-by-play:
+`uv run statify compute defense --season <year>` puts it back. `compute matchup`
+refuses to run until it has.
+
+`compute defense` now splits a back's carries from his catches, and **counts
+sacks as `(QB, pass)`** rather than discarding them as having no receiver. A
+sack is the best outcome a pass rush produces, so excluding it understated
+exactly the defenses the table exists to identify, and including it makes every
+`play_type = 'pass'` row for a team-week add up to a complete dropback. That
+bucket is mostly but not purely sacks: 2024 put 1,428 plays there against 1,392
+sacks, the rest being passes a quarterback caught, 31 of them Taysom Hill.
+
+`compute matchup` turns that table into the number feature 18 multiplies by: a
+defense's trailing EPA allowed minus the league's over the same weeks. **Negative
+is always a better defense**, for every position and play type. A difference
+rather than a ratio, because EPA per play crosses zero. It emits a row for every
+bucket the season contains for every week a defense played, not only the buckets
+that came up that week, so a factor can always be looked up; a defense that has
+never faced a bucket gets a row with NULLs rather than no row at all.
+
 `compute usage` reads `weekly_actuals`, so re-run it after anything that writes
 that table: `ingest weekly`, `ingest snaps`, `ingest redzone`, or `ingest
 routes`. `compute efficiency` then reads `weekly_actuals` and takes `routes` from
 `player_usage_weekly`, and `compute form` reads all three, so the order is
 weekly, redzone and snaps, then usage, then efficiency, then form. Each is stale
-until the one before it has run.
+until the one before it has run. `compute matchup` sits on its own chain of two:
+`compute defense` first, then `compute matchup`. It takes no `--week`, for the
+same reason `compute form` does not.
 
 The two commands disagree on what to do about a missing prerequisite, on
 purpose. `compute efficiency` refuses to run at all when the season has weekly

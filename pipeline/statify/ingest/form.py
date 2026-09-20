@@ -14,6 +14,7 @@ from typing import NamedTuple
 
 from statify.ingest.common import utc_now, write
 from statify.ingest.usage import share, weighted_opportunity
+from statify.ingest.windows import paired_sum, prior_games, window_slice
 
 # Suffix and window size. None means every prior game of the season.
 WINDOWS: tuple[tuple[str, int | None], ...] = (("l3", 3), ("l5", 5), ("std", None))
@@ -70,38 +71,6 @@ def ryoe_attempts(ryoe: float | None, ryoe_per_att: float | None) -> float | Non
     return ryoe / ryoe_per_att
 
 
-def prior_games(history: list[dict], week: int) -> list[dict]:
-    """Games before `week`, oldest first.
-
-    Strictly before. `<=` here would leak the week's own result into its own
-    form and quietly invalidate every projection built on it.
-    """
-    return sorted((game for game in history if game["week"] < week), key=lambda g: g["week"])
-
-
-def window_slice(prior: list[dict], size: int | None) -> list[dict]:
-    """The most recent `size` games played, or all of them.
-
-    Counted in games, not weeks. A player who missed a month has a last-3 window
-    of his last three appearances; counting weeks would fold the absences in as
-    zeros.
-    """
-    if size is None:
-        return prior
-    return prior[-size:]
-
-
-def _paired_sum(games: list[dict], numerator: str, denominator: str) -> tuple[float, float]:
-    """Sum a numerator and denominator over games where both are present."""
-    top = bottom = 0.0
-    for game in games:
-        if game.get(numerator) is None or game.get(denominator) is None:
-            continue
-        top += game[numerator]
-        bottom += game[denominator]
-    return top, bottom
-
-
 def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
@@ -134,7 +103,7 @@ def window_values(games: list[dict]) -> dict:
         values[column] = _mean(present)
 
     for column, (numerator, denominator) in WEIGHTED_RATES.items():
-        top, bottom = _paired_sum(games, numerator, denominator)
+        top, bottom = paired_sum(games, numerator, denominator)
         values[column] = share(top, bottom)
 
     # From the windowed shares, not an average of weekly WOPR: the shares are
