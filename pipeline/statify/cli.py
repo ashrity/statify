@@ -314,10 +314,18 @@ def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
 
 def _cmd_compute_form(args: argparse.Namespace) -> int:
     with connection() as conn:
-        rows, no_history = form.load_form(conn, args.season)
+        counts = form.load_form(conn, args.season)
 
-    print(f"{rows} form rows for {args.season}")
-    print(f"{no_history} are a player's first game, with no prior form")
+    print(f"{counts.rows} form rows for {args.season}")
+    print(f"{counts.no_history} are a player's first game, with no prior form")
+    if counts.efficiency_rows == 0:
+        print(
+            f"no efficiency rows for {args.season}, so catch rate and YAC over "
+            f"expected are NULL on every row. Run: statify compute efficiency "
+            f"--season {args.season}"
+        )
+    else:
+        print(f"{counts.with_over_expected} carry catch rate over expected")
     return 0
 
 

@@ -10,6 +10,8 @@ than inferred from an aggregate.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from statify.ingest.common import utc_now, write
 from statify.ingest.usage import share, weighted_opportunity
 
@@ -18,17 +20,54 @@ WINDOWS: tuple[tuple[str, int | None], ...] = (("l3", 3), ("l5", 5), ("std", Non
 
 # Numerator and denominator for each volume-weighted rate.
 WEIGHTED_RATES = {
+    # Usage: what share of the team's opportunity he took (feature 11).
     "target_share": ("targets", "team_targets"),
     "air_yards_share": ("air_yards", "team_air_yards"),
     "adot": ("air_yards", "targets"),
     "rz_touch_share": ("red_zone_touches", "team_red_zone_touches"),
     "route_participation": ("routes", "team_dropbacks"),
     "targets_per_route": ("targets", "routes"),
+
+    # Efficiency: what he did with it (feature 12b). The two over-expected rates
+    # take an already-differenced numerator, computed per game in the query,
+    # so the window arithmetic stays one shape for every rate.
+    "yprr": ("receiving_yards", "routes"),
+    "yards_per_target": ("receiving_yards", "targets"),
+    "catch_rate": ("receptions", "targets"),
+    "croe": ("catches_over_expected", "cp_targets"),
+    "yacoe": ("yac_over_expected", "xyac_receptions"),
+    "epa_per_target": ("receiving_epa", "targets"),
+    "yards_per_carry": ("rushing_yards", "carries"),
+    "epa_per_carry": ("rushing_epa", "carries"),
+    "yards_per_attempt": ("passing_yards", "attempts"),
+    "completion_rate": ("completions", "attempts"),
+    "epa_per_attempt": ("passing_epa", "attempts"),
+
+    # The one rate whose denominator is not ours. See ryoe_attempts.
+    "ryoe_per_att": ("ryoe", "ryoe_attempts"),
 }
 
 PER_GAME = {"targets_pg": "targets", "carries_pg": "carries", "routes_pg": "routes"}
 
 VALUE_COLUMNS = tuple(PER_GAME) + tuple(WEIGHTED_RATES) + ("wopr", "snap_share")
+
+
+def ryoe_attempts(ryoe: float | None, ryoe_per_att: float | None) -> float | None:
+    """The attempt count Next Gen Stats divided by, recovered from its own output.
+
+    Our carries are the wrong denominator here. Measured on 2024, NGS's implied
+    attempt count matches our carries exactly on only 74.7% of rows, is within 1
+    on another 20.8%, and is further off on the rest, one game showing 18 against
+    our 25. Dividing their numerator by our denominator would produce a figure
+    neither definition recognises, so theirs is reconstructed instead: exact on
+    all 554 rows, where it always comes out a whole number.
+
+    None when the rate is missing or zero, which leaves the game out of the
+    window entirely rather than dividing by something invented.
+    """
+    if ryoe is None or not ryoe_per_att:
+        return None
+    return ryoe / ryoe_per_att
 
 
 def prior_games(history: list[dict], week: int) -> list[dict]:
@@ -67,6 +106,23 @@ def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
+# The one rate whose sample size is not games_*. Every other metric is measured
+# whenever the player appeared, so the appearance count describes it. Next Gen
+# Stats measures rush yards over expected only in a 10-carry game, so a back can
+# have fifteen prior appearances and one measured one, and nothing else in the
+# row would say so.
+RYOE_SAMPLE = ("ryoe", "ryoe_attempts")
+
+
+def measured_games(games: list[dict], numerator: str, denominator: str) -> int:
+    """How many games in a window actually supplied both parts of a rate."""
+    return sum(
+        1
+        for game in games
+        if game.get(numerator) is not None and game.get(denominator) is not None
+    )
+
+
 def window_values(games: list[dict]) -> dict:
     """Every metric for one window. All None when the window is empty."""
     if not games:
@@ -99,6 +155,7 @@ def form_row(player_id: str, season: int, week: int, history: list[dict], update
     for suffix, size in WINDOWS:
         games = window_slice(prior, size)
         row[f"games_{suffix}"] = len(games)
+        row[f"ryoe_games_{suffix}"] = measured_games(games, *RYOE_SAMPLE)
         for column, value in window_values(games).items():
             row[f"{column}_{suffix}"] = value
 
@@ -123,6 +180,7 @@ def form_columns() -> list[str]:
     columns = ["player_id", "season", "week"]
     for suffix, _ in WINDOWS:
         columns.append(f"games_{suffix}")
+        columns.append(f"ryoe_games_{suffix}")
         columns.extend(f"{value}_{suffix}" for value in VALUE_COLUMNS)
     columns.append("ewma_half_life")
     columns.extend(f"{value}_ewma" for value in VALUE_COLUMNS)
@@ -154,22 +212,52 @@ def _upsert_sql() -> str:
 FORM_UPSERT = _upsert_sql()
 
 # player_usage_weekly holds the shares and their denominators; weekly_actuals
-# holds carries and snap_share, which never became usage metrics.
+# holds the box-score counts. Only the two over-expected metrics need
+# player_efficiency_weekly, because only their parts come from play-by-play.
+# That keeps nine of the eleven efficiency rates working even if
+# compute efficiency has never run.
+#
+# targets, carries and routes are each selected once and reused. All three also
+# exist on player_efficiency_weekly, and each history game is a dict(row), so
+# selecting either name twice would silently keep whichever came last. Feature
+# 12a measured 0 rows where its counts disagree with weekly_actuals, so there is
+# nothing to choose between them anyway.
 HISTORY_QUERY = """
 SELECT u.player_id, u.week, u.targets, u.team_targets,
        u.air_yards, u.team_air_yards,
        u.red_zone_touches, u.team_red_zone_touches,
        u.routes, u.team_dropbacks,
-       w.carries, w.snap_share
+       w.carries, w.snap_share,
+       w.receiving_yards, w.receptions, w.receiving_epa,
+       w.rushing_yards, w.rushing_epa,
+       w.attempts, w.completions, w.passing_yards, w.passing_epa,
+       e.cp_targets,
+       e.cp_receptions - e.expected_receptions AS catches_over_expected,
+       e.xyac_receptions,
+       e.xyac_actual_yards - e.expected_yac AS yac_over_expected,
+       n.ryoe, n.ryoe_per_att
 FROM player_usage_weekly u
 JOIN weekly_actuals w ON w.player_id = u.player_id AND w.game_id = u.game_id
+LEFT JOIN player_efficiency_weekly e
+  ON e.player_id = u.player_id AND e.game_id = u.game_id
+LEFT JOIN next_gen_stats n
+  ON n.player_id = u.player_id AND n.season = u.season AND n.week = u.week
 WHERE u.season = ?
 ORDER BY u.player_id, u.week
 """
 
 
-def load_form(conn, season: int) -> tuple[int, int]:
-    """Compute and upsert one season's form. Returns (rows, rows_with_no_history).
+class FormCounts(NamedTuple):
+    """What one run of load_form wrote, for the command to report."""
+
+    rows: int
+    no_history: int
+    with_over_expected: int
+    efficiency_rows: int
+
+
+def load_form(conn, season: int) -> FormCounts:
+    """Compute and upsert one season's form.
 
     Takes no week filter: a week's form depends on every earlier week, so the
     season is the natural unit.
@@ -177,6 +265,7 @@ def load_form(conn, season: int) -> tuple[int, int]:
     histories: dict[str, list[dict]] = {}
     for row in conn.execute(HISTORY_QUERY, (season,)):
         game = dict(row)
+        game["ryoe_attempts"] = ryoe_attempts(game["ryoe"], game["ryoe_per_att"])
         histories.setdefault(game.pop("player_id"), []).append(game)
 
     updated_at = utc_now()
@@ -185,7 +274,19 @@ def load_form(conn, season: int) -> tuple[int, int]:
         rows.extend(form_rows(player_id, season, history, updated_at))
 
     write(conn, FORM_UPSERT, rows)
-    return len(rows), sum(1 for row in rows if row["games_std"] == 0)
+
+    # Read back rather than inferred from the rows, so an empty efficiency table
+    # is reported as the ordering mistake it usually is rather than as a season
+    # where nobody was ever targeted.
+    efficiency_rows = conn.execute(
+        "SELECT COUNT(*) FROM player_efficiency_weekly WHERE season = ?", (season,)
+    ).fetchone()[0]
+    return FormCounts(
+        rows=len(rows),
+        no_history=sum(1 for row in rows if row["games_std"] == 0),
+        with_over_expected=sum(1 for row in rows if row["croe_std"] is not None),
+        efficiency_rows=efficiency_rows,
+    )
 
 
 # A game three appearances back carries half the weight of the most recent one.

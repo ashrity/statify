@@ -83,7 +83,23 @@ Computed metrics, derived from data already stored rather than fetched:
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
 a row cannot disagree. The half-life is stored on every row rather than only in
-the code.
+the code. It covers usage and efficiency together, for the same reason: one row
+is what was known entering that week, and two tables could disagree about what
+"last 3 games" means.
+
+**Rush yards over expected is measured only in a 10-carry game.** Next Gen Stats
+publishes nothing below that, and measured on 2024 it is a hard threshold rather
+than sparse sampling: 554 of 554 back-weeks at 10 or more carries have it, 0 of
+819 below. So a back's trailing figure is built from his heavy-workload games
+only. `games_std` does not say that, which is why `player_form_weekly` carries
+`ryoe_games_l3`, `ryoe_games_l5` and `ryoe_games_std`: **read the sample count
+before trusting the rate.** Entering week 17 of 2024 the league leader at 3.951
+had one measured game against Derrick Henry's fifteen at 1.772, and every other
+column on the two rows looked alike. Migrations 017 and 018 carry the same
+warning.
+
+`ryoe_per_att` also divides by NGS's own attempt count, recovered as `ryoe` over
+`ryoe_per_att`, not by our `carries`. The two disagree on a quarter of rows.
 
 **Routes are an approximation.** No free source publishes per-player route
 counts, so `ingest routes` counts players on the field for a dropback. A player
@@ -107,11 +123,17 @@ own denominator so it can be weighted by volume across weeks.
 `compute usage` reads `weekly_actuals`, so re-run it after anything that writes
 that table: `ingest weekly`, `ingest snaps`, `ingest redzone`, or `ingest
 routes`. `compute efficiency` then reads `weekly_actuals` and takes `routes` from
-`player_usage_weekly`, and `compute form` reads `player_usage_weekly`, so the
-order is weekly, redzone and snaps, then usage, then efficiency, then form. Each
-is stale until the one before it has run. `compute efficiency` refuses to run at
-all when the season has weekly actuals but no usage rows, rather than filling
-every `yprr` with NULL and reporting success.
+`player_usage_weekly`, and `compute form` reads all three, so the order is
+weekly, redzone and snaps, then usage, then efficiency, then form. Each is stale
+until the one before it has run.
+
+The two commands disagree on what to do about a missing prerequisite, on
+purpose. `compute efficiency` refuses to run at all when the season has weekly
+actuals but no usage rows, rather than filling every `yprr` with NULL and
+reporting success. `compute form` only warns, naming the command to run, because
+it predates this dependency and ten of its twelve efficiency rates read
+`weekly_actuals` directly: without `compute efficiency` it loses catch rate over
+expected and YAC over expected and nothing else.
 
 `compute form` takes no `--week`: a week's form is built from every earlier week,
 so the season is the unit.

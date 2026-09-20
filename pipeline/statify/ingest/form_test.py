@@ -5,7 +5,9 @@ from statify.ingest.form import (
     form_columns,
     form_row,
     form_rows,
+    measured_games,
     prior_games,
+    ryoe_attempts,
     window_slice,
     window_values,
 )
@@ -15,7 +17,7 @@ UPDATED_AT = "2026-01-01T00:00:00+00:00"
 
 def game(week, targets=5, team_targets=30, air_yards=50, team_air_yards=250,
          carries=0, red_zone_touches=1, team_red_zone_touches=10, snap_share=0.8,
-         routes=30, team_dropbacks=40):
+         routes=30, team_dropbacks=40, **efficiency):
     return {
         "week": week,
         "targets": targets,
@@ -28,7 +30,22 @@ def game(week, targets=5, team_targets=30, air_yards=50, team_air_yards=250,
         "snap_share": snap_share,
         "routes": routes,
         "team_dropbacks": team_dropbacks,
+        **{field: None for field in EFFICIENCY_FIELDS},
+        **efficiency,
     }
+
+
+# Everything the efficiency rates read. Defaulted to None rather than 0 so a
+# test that does not mention a metric leaves it absent rather than asserting
+# against a denominator it never set.
+EFFICIENCY_FIELDS = (
+    "receiving_yards", "receptions", "receiving_epa",
+    "rushing_yards", "rushing_epa",
+    "attempts", "completions", "passing_yards", "passing_epa",
+    "cp_targets", "catches_over_expected",
+    "xyac_receptions", "yac_over_expected",
+    "ryoe", "ryoe_attempts",
+)
 
 
 # --- the boundary, which is the whole feature -------------------------------
@@ -265,3 +282,193 @@ def test_form_columns_cover_every_ewma_value():
     assert "ewma_half_life" in columns
     for value in VALUE_COLUMNS:
         assert f"{value}_ewma" in columns
+
+
+# --- efficiency rates (feature 12b) -----------------------------------------
+
+# Each rate, with a small and a large game. The large one has the worse rate, so
+# a mean of ratios always lands above the ratio of sums and the two can never be
+# confused by an unlucky choice of numbers.
+EFFICIENCY_RATES = [
+    ("yprr", "receiving_yards", "routes", (30, 5), (60, 40)),
+    ("yards_per_target", "receiving_yards", "targets", (30, 2), (60, 20)),
+    ("catch_rate", "receptions", "targets", (2, 2), (4, 20)),
+    ("croe", "catches_over_expected", "cp_targets", (1.0, 2), (1.0, 20)),
+    ("yacoe", "yac_over_expected", "xyac_receptions", (4.0, 2), (4.0, 20)),
+    ("epa_per_target", "receiving_epa", "targets", (4.0, 2), (4.0, 20)),
+    ("yards_per_carry", "rushing_yards", "carries", (20, 2), (40, 20)),
+    ("epa_per_carry", "rushing_epa", "carries", (4.0, 2), (4.0, 20)),
+    ("yards_per_attempt", "passing_yards", "attempts", (30, 2), (60, 20)),
+    ("completion_rate", "completions", "attempts", (2, 2), (4, 20)),
+    ("epa_per_attempt", "passing_epa", "attempts", (4.0, 2), (4.0, 20)),
+]
+
+
+def test_every_efficiency_rate_is_a_ratio_of_sums():
+    """The error feature 11a exists to prevent, which each new rate can reintroduce."""
+    for rate, numerator, denominator, small, large in EFFICIENCY_RATES:
+        games = [
+            game(1, **{numerator: small[0], denominator: small[1]}),
+            game(2, **{numerator: large[0], denominator: large[1]}),
+        ]
+        expected = (small[0] + large[0]) / (small[1] + large[1])
+        mean_of_ratios = (small[0] / small[1] + large[0] / large[1]) / 2
+        values = window_values(games)
+        assert values[rate] == expected, rate
+        assert values[rate] != mean_of_ratios, rate
+
+
+def test_every_efficiency_rate_is_null_without_a_denominator():
+    for rate, numerator, denominator, _small, _large in EFFICIENCY_RATES:
+        values = window_values([game(1, **{numerator: 5, denominator: 0})])
+        assert values[rate] is None, rate
+
+
+def test_every_efficiency_rate_is_null_when_the_metric_is_absent():
+    """A receiver's window must not invent a passing rate out of nothing."""
+    values = window_values([game(1)])
+    for rate, *_ in EFFICIENCY_RATES:
+        assert values[rate] is None, rate
+
+
+def test_a_difference_numerator_sums_rather_than_averaging():
+    """+2 over 10 targets and -1 over 20 is 1/30, not the mean of 0.2 and -0.05."""
+    games = [
+        game(1, catches_over_expected=2.0, cp_targets=10),
+        game(2, catches_over_expected=-1.0, cp_targets=20),
+    ]
+    assert window_values(games)["croe"] == 1 / 30
+    assert window_values(games)["croe"] != (0.2 + -0.05) / 2
+
+
+def test_a_negative_over_expected_window_stays_negative():
+    games = [game(1, catches_over_expected=-3.0, cp_targets=10)]
+    assert window_values(games)["croe"] < 0
+
+
+def test_efficiency_rates_use_the_same_prior_window_as_usage():
+    """One boundary for the whole row, inherited from feature 11a."""
+    history = [
+        game(1, receiving_yards=100, routes=50),
+        game(2, receiving_yards=0, routes=50),
+    ]
+    row = form_row("p", 2024, 2, history, UPDATED_AT)
+    assert row["yprr_std"] == 2.0
+
+
+def test_efficiency_rates_are_weighted_toward_recent_games():
+    games = [
+        game(1, receiving_yards=10, routes=50),
+        game(2, receiving_yards=90, routes=50),
+    ]
+    weighted = ewma_values(games, half_life=1.0)["yprr"]
+    assert weighted > window_values(games)["yprr"]
+
+
+def test_form_columns_names_every_efficiency_rate_in_every_window():
+    columns = set(form_columns())
+    for rate, *_ in EFFICIENCY_RATES + [("ryoe_per_att",)]:
+        for suffix in ("l3", "l5", "std", "ewma"):
+            assert f"{rate}_{suffix}" in columns, f"{rate}_{suffix}"
+
+
+# --- rush yards over expected, the one borrowed denominator ------------------
+
+
+def test_attempts_are_recovered_from_the_two_published_figures():
+    """NGS gives a total and a rate; their quotient is the count it divided by."""
+    assert ryoe_attempts(30.0, 2.0) == 15.0
+
+
+def test_a_negative_total_still_recovers_a_positive_count():
+    assert ryoe_attempts(-30.0, -2.0) == 15.0
+
+
+def test_a_zero_rate_recovers_nothing():
+    """Zero over expected on a real workload, but the count is unrecoverable."""
+    assert ryoe_attempts(0.0, 0.0) is None
+
+
+def test_a_missing_rate_recovers_nothing():
+    assert ryoe_attempts(30.0, None) is None
+
+
+def test_a_missing_total_recovers_nothing():
+    assert ryoe_attempts(None, 2.0) is None
+
+
+def test_ryoe_is_weighted_by_ngs_attempts_not_our_carries():
+    """The measured disagreement: 18 attempts against 25 carries on one 2024 game."""
+    games = [
+        game(1, carries=25, ryoe=36.0, ryoe_attempts=18.0),
+        game(2, carries=10, ryoe=-6.0, ryoe_attempts=12.0),
+    ]
+    assert window_values(games)["ryoe_per_att"] == 30.0 / 30.0
+    # What our carries would have given, which is a different number entirely.
+    assert window_values(games)["ryoe_per_att"] != 30.0 / 35.0
+
+
+def test_a_game_ngs_never_measured_is_left_out_of_the_window():
+    """Under 10 carries NGS publishes nothing, so that game cannot join the average."""
+    games = [
+        game(1, carries=20, ryoe=20.0, ryoe_attempts=20.0),
+        game(2, carries=4, ryoe=None, ryoe_attempts=None),
+    ]
+    assert window_values(games)["ryoe_per_att"] == 1.0
+
+
+def test_ryoe_is_null_when_ngs_measured_nothing_in_the_window():
+    assert window_values([game(1, carries=4)])["ryoe_per_att"] is None
+
+
+# --- how big the RYOE sample was --------------------------------------------
+
+
+def test_measured_games_counts_only_games_carrying_both_parts():
+    games = [
+        game(1, ryoe=10.0, ryoe_attempts=12.0),
+        game(2, ryoe=None, ryoe_attempts=None),
+        game(3, ryoe=5.0, ryoe_attempts=11.0),
+    ]
+    assert measured_games(games, "ryoe", "ryoe_attempts") == 2
+
+
+def test_measured_games_of_an_empty_window_is_zero():
+    assert measured_games([], "ryoe", "ryoe_attempts") == 0
+
+
+def test_appearances_and_measured_games_can_disagree():
+    """Sean Tucker, 2024: fifteen prior games, one of them measured."""
+    history = [game(w, carries=4) for w in range(1, 16)]
+    history.append(game(16, carries=20, ryoe=40.0, ryoe_attempts=20.0))
+    row = form_row("p", 2024, 17, history, UPDATED_AT)
+    assert row["games_std"] == 16
+    assert row["ryoe_games_std"] == 1
+    assert row["ryoe_per_att_std"] == 2.0
+
+
+def test_a_window_ngs_never_measured_reports_zero_not_null():
+    """games_std says he played; ryoe_games_std says nobody measured him."""
+    row = form_row("p", 2024, 5, [game(w, carries=3) for w in range(1, 5)], UPDATED_AT)
+    assert row["games_std"] == 4
+    assert row["ryoe_games_std"] == 0
+    assert row["ryoe_per_att_std"] is None
+
+
+def test_the_sample_count_follows_its_own_window():
+    history = [
+        game(1, ryoe=10.0, ryoe_attempts=10.0),
+        game(2, ryoe=10.0, ryoe_attempts=10.0),
+        game(3, carries=2),
+        game(4, carries=2),
+    ]
+    row = form_row("p", 2024, 5, history, UPDATED_AT)
+    assert row["ryoe_games_std"] == 2
+    assert row["ryoe_games_l3"] == 1   # weeks 2, 3 and 4; only week 2 measured
+
+
+def test_form_columns_names_the_sample_counts():
+    columns = set(form_columns())
+    for suffix in ("l3", "l5", "std"):
+        assert f"ryoe_games_{suffix}" in columns
+    assert "ryoe_games_ewma" not in columns
