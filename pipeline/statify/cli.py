@@ -13,6 +13,7 @@ from statify.ingest import (
     defense,
     depth,
     efficiency,
+    environment,
     form,
     injuries,
     market,
@@ -338,6 +339,17 @@ def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_environment(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows, with_market, with_pace = environment.load_environment(conn, args.season)
+
+    print(f"{rows} team/game environment rows for {args.season}")
+    # The two differ for real reasons, not as an error: a past week can never
+    # have a line, and week 1 has no prior pace.
+    print(f"{with_market} carry a market line, {with_pace} carry trailing pace")
+    return 0
+
+
 def _cmd_compute_matchup(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_prior = matchup.load_matchup(conn, args.season)
@@ -531,6 +543,10 @@ def build_parser() -> argparse.ArgumentParser:
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     efficiency_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     efficiency_cmd.set_defaults(func=_cmd_compute_efficiency)
+
+    environment_cmd = computations.add_parser("environment", help="market and pace per team per game")
+    environment_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
+    environment_cmd.set_defaults(func=_cmd_compute_environment)
 
     matchup_cmd = computations.add_parser("matchup", help="defense strength relative to league")
     matchup_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")

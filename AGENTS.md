@@ -99,7 +99,8 @@ Computed metrics, derived from data already stored rather than fetched:
 
 - Team defense by position and play type: `uv run statify compute defense --season <year> [--week <n>]`
 - Defensive matchup factors: `uv run statify compute matchup --season <year>`
-- Defensive tendencies: `uv run statify compute tendencies --season <year>` (2016 or later)
+- Defensive tendencies: `uv run statify compute tendencies --season <year>` (2016 to 2025)
+- Game environment: `uv run statify compute environment --season <year>`
 - Offensive pace and PROE: `uv run statify compute tempo --season <year> [--week <n>]`
 - Player usage shares: `uv run statify compute usage --season <year> [--week <n>]`
 - Player efficiency: `uv run statify compute efficiency --season <year> [--week <n>]`
@@ -190,6 +191,40 @@ pass-rusher counts at all; those rows keep their man and sack rates and carry
 NULL only in the blitz columns. `coverage_snaps` is also the sample size and
 runs from 14 to 63 across a team-week, so read it before trusting a single
 week's rate.
+
+`compute environment` is the market and pace half of the matchup, one row per
+team per game. It needs `ingest market` and `compute tempo` to have run for the
+season, and it is **driven by `games`, not by the market**: every game gets a
+row and the market columns are NULL where no line was captured. Past weeks can
+never have one, because historical odds are a paid tier, and feature 23's
+backtest still wants their pace half. Measured on 2026: 544 rows, of which 28
+carry a line (week 7, the only week captured) and 512 carry trailing pace (all
+but week 1).
+
+Its market columns are a **consensus**, the median across books at each book's
+latest capture, not one row per book. The implied total is derived from the
+consensus spread and total rather than taken as a third median, because three
+independent medians over disagreeing books need not satisfy
+`total / 2 - spread / 2`. A median also ignores a single stale book where a mean
+would not. `books` records how many the consensus came from, and it is not
+always nine: one 2026 week 7 game had eight.
+
+Pace and PROE are trailing, strictly prior, and **volume-weighted rather than a
+mean of weekly rates**. Baltimore's neutral-snap counts across six 2026 weeks
+run from 7 to 37, so a mean would let a blowout weigh as much as a full game.
+`pace_weeks` and `proe_weeks` record the sample behind each.
+
+**There is no weather in `compute environment`, deliberately.** Migration 008
+records that the stored reading is the settled game-time condition rather than a
+pre-kickoff forecast, and using it as a projection input would leak the result
+of the game being projected. Feature 14b adds a forecast source first; migration
+023 repeats the warning.
+
+**2026 cannot have routes or defensive tendencies.** nflverse participation data
+stops at 2025, so for 2026 `ingest routes` fails outright, every `yprr` is NULL,
+and `compute tendencies` has no input. `ingest depth` and `ingest injuries` also
+fail on 2026 while still working on 2024: the current-season feeds have a
+different column set. None of that is repaired yet.
 
 `compute usage` reads `weekly_actuals`, so re-run it after anything that writes
 that table: `ingest weekly`, `ingest snaps`, `ingest redzone`, or `ingest
