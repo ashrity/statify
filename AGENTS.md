@@ -49,6 +49,7 @@ Data pipeline, all run from `pipeline/`:
 - Weather (outdoor games): `uv run statify ingest weather --season <year>`
 - Player prop lines: `uv run statify ingest props --season <year> --week <n> [--dry-run]`
 - Prop identity audit: `uv run statify props audit --season <year> --week <n> [--dry-run]`
+- Team spreads and totals: `uv run statify ingest market --season <year> [--week <n>] [--dry-run]`
 - Tests: `uv run pytest`
 
 Ingest order matters: teams, then games and players for a season, then weekly,
@@ -60,13 +61,35 @@ re-running one never wipes another's work.
 recorded no stat, so run `ingest redzone` after it to fill their red zone
 touches.
 
-`ingest props` and `props audit` need `ODDS_API_KEY` in `.env` (gitignored) and
-spend metered credits from The Odds API. Cost is markets times events, measured:
-one week of the four over/under markets is about 64 credits against a 500 a month
-free tier, so **one capture per week fits and two do not**. Both commands take
-`--dry-run` to print the estimate and spend nothing, and both refuse to run if
-the balance would drop below 50. Historical odds are not available on the free
-tier, which blocks features 27 and 28.
+Three commands need `ODDS_API_KEY` in `.env` (gitignored) and spend metered
+credits from The Odds API, but **they do not cost remotely the same**, because
+two different endpoints are involved:
+
+| Command | Endpoint | Measured cost |
+| --- | --- | --- |
+| `ingest props`, `props audit` | per event | markets times events, about **64 a week** |
+| `ingest market` | bulk | **2**, for the whole slate |
+
+Player props are not served by the bulk endpoint, which is the only reason
+feature 7a pays per game. Team markets are, and the bulk price is one credit per
+market however many games come back, so `ingest market --week 7` costs exactly
+what omitting `--week` costs: **`--week` narrows what is stored, never what is
+fetched**. Do not carry the props mental model across.
+
+Against a 500 a month free tier that makes one props capture per week the
+binding constraint, while market captures are effectively free. All three take
+`--dry-run` to print the slate and the estimate while spending nothing; props
+additionally refuses to run below a 50-credit floor, which `ingest market` has
+no need of. Historical odds are not available on the free tier, which blocks
+features 27 and 28.
+
+`ingest market` stores a row per game, team and book, so two rows per game carry
+the same spread from opposite signs plus `implied_team_total`, which is
+`game_total / 2 - spread / 2` and always sums back to the total across the pair.
+Re-running decides novelty by **content**: a line that has not moved is not
+stored again, because `captured_at` differs on every run and would otherwise
+record the same slate twice. That is the mistake feature 7a made with 433 rows,
+and a first version of this loader repeated it by doubling a 240-row slate.
 
 Feeds disagree on team abbreviations (Next Gen Stats says `LAR` where the rest say
 `LA`). Inbound rows go through `normalize_team()` in `statify/ingest/common.py`;

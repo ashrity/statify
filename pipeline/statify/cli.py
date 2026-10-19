@@ -15,6 +15,7 @@ from statify.ingest import (
     efficiency,
     form,
     injuries,
+    market,
     matchup,
     ngs,
     props,
@@ -146,6 +147,29 @@ def _cmd_ingest_weather(args: argparse.Namespace) -> int:
     print(f"{upserted} games given weather for {args.season}")
     print(f"{indoor} indoor games skipped (weather does not apply)")
     print(f"{no_reading} outdoor games with no upstream reading")
+    return 0
+
+
+def _cmd_ingest_market(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        result = market.load_market_data(conn, args.season, args.week, args.dry_run)
+
+    scope = f"week {args.week}" if args.week is not None else "every upcoming week"
+    print(f"{result['events']} events on the slate, "
+          f"{result['resolved']} resolved to a {args.season} game")
+    for name in result["unresolved"]:
+        print(f"  unresolved: {name}")
+    print(f"{result['in_scope']} in scope ({scope})")
+    # Cost is per market, so narrowing the week saves nothing here. Saying so
+    # beside the number stops anyone copying ingest props' mental model.
+    print(f"cost: {result['estimate']} credits for the whole slate, "
+          f"whatever --week says. Remaining: {result['remaining']}")
+    if args.dry_run:
+        print("dry run, nothing fetched and nothing stored")
+        return 0
+
+    print(f"{result['rows']} team/book rows stored, "
+          f"{result['unchanged']} unchanged since the last capture")
     return 0
 
 
@@ -464,6 +488,12 @@ def build_parser() -> argparse.ArgumentParser:
     weather_cmd = datasets.add_parser("weather", help="load one season's per-game weather")
     weather_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
     weather_cmd.set_defaults(func=_cmd_ingest_weather)
+
+    market_cmd = datasets.add_parser("market", help="team spreads and totals from The Odds API")
+    market_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
+    market_cmd.add_argument("--week", type=int, help="store only this week; does not change the cost")
+    market_cmd.add_argument("--dry-run", action="store_true", help="show the slate and cost, spend nothing")
+    market_cmd.set_defaults(func=_cmd_ingest_market)
 
     props_cmd = subcommands.add_parser("props", help="player prop lines from The Odds API")
     props_sub = props_cmd.add_subparsers(dest="action", required=True)

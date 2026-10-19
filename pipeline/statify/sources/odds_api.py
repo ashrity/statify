@@ -67,6 +67,28 @@ def events() -> tuple[list[dict], int | None]:
     return body, remaining
 
 
+def bulk_odds(markets: list[str]) -> tuple[list[dict], int | None]:
+    """Team markets for every upcoming event, in one request.
+
+    Costs one credit per market no matter how many events come back: measured
+    at 2 for a 15-game slate asking for spreads and totals. That is the whole
+    reason feature 8 is cheap and feature 7a is not. Player props are not
+    served here, so `event_odds` still pays per game.
+
+    Narrowing to one week saves nothing, because the price does not depend on
+    how many events are returned.
+    """
+    body, remaining = _get(
+        f"/sports/{SPORT}/odds",
+        regions=REGION,
+        markets=",".join(markets),
+        oddsFormat="american",
+    )
+    if not isinstance(body, list):
+        raise RuntimeError("odds api bulk odds returned an unexpected shape")
+    return body, remaining
+
+
 def event_odds(event_id: str, markets: list[str]) -> tuple[dict, int | None]:
     """Player props for one event.
 
