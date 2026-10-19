@@ -164,8 +164,29 @@ expected and YAC over expected and nothing else.
 so the season is the unit.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
-the relevant `ingest` commands for a season first. Nothing under `compute` makes
-a network request beyond the cached nflverse pull.
+the relevant `ingest` commands for a season first.
+
+**nflverse pulls are cached on disk for 24 hours.** `statify/sources/nflverse.py`
+sets `cache_mode = filesystem`, because nflreadpy's default caches in memory
+only and every statify command is its own process: without this, each `compute`
+re-downloaded the whole play-by-play parquet, and a GitHub outage stopped all
+work. Measured on 2024, `compute defense` takes about 3.6s cold and 1.2s warm,
+and a warm run completes with the network unreachable.
+
+Two things follow from that:
+
+- **A mid-week re-pull may serve yesterday's data.** Injuries, depth charts and
+  rosters change daily, and the intended workflow runs once mid-week and again
+  near kickoff. Force a fresh download when it matters:
+  `NFLREADPY_CACHE=off uv run statify ingest injuries --season <year> --week <n>`.
+  Setting `NFLREADPY_CACHE` to anything non-empty also stops the project
+  overriding it, so `filesystem`, `memory` and `off` all behave as documented.
+- **The cache is not where it says it is**, on the Microsoft Store build of
+  Python. nflreadpy reports `%LOCALAPPDATA%\nflreadpy\nflreadpy\Cache`, but Store
+  Python virtualizes writes, so the parquet files actually land under
+  `%LOCALAPPDATA%\Packages\PythonSoftwareFoundation.Python.3.13_<id>\LocalCache\Local\nflreadpy\...`.
+  Ask Python for `nflreadpy.config.get_config().cache_dir` and call `.resolve()`
+  on it rather than trusting the printed path.
 
 `uv run pytest` (from `pipeline/`) is the test command, so the testing gate in
 `blueprint/context/coding-standards.md` is on: a step that adds pure logic ships a

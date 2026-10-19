@@ -6,10 +6,43 @@ source, or stubbing it in a test, a one-file change.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from typing import Any, Callable
 
 import nflreadpy as nfl
 import polars as pl
+from nflreadpy.config import update_config
+
+CACHE_VARIABLE = "NFLREADPY_CACHE"
+
+
+def cache_mode_to_apply(environ: Mapping[str, str]) -> str | None:
+    """"filesystem", or None when the environment has already chosen.
+
+    nflreadpy caches in memory by default, which lasts exactly as long as one
+    process. Every statify command is its own process, so nothing was ever
+    reused: each compute re-downloaded the whole play-by-play parquet, and a
+    GitHub outage on 19 September 2025 stopped all work for twenty minutes
+    despite the same file having been fetched several times that session.
+
+    The environment wins when it has an opinion. NFLREADPY_CACHE is the
+    documented way to configure this, and it is also the documented way to force
+    a fresh pull mid-week when injuries have moved since the last run, so
+    overriding it here would remove the escape hatch.
+    """
+    if (environ.get(CACHE_VARIABLE) or "").strip():
+        return None
+    return "filesystem"
+
+
+def _configure_cache() -> None:
+    mode = cache_mode_to_apply(os.environ)
+    if mode:
+        update_config(cache_mode=mode)
+
+
+_configure_cache()
 
 
 def _pull(name: str, fn: Callable[..., Any], **kwargs: Any) -> pl.DataFrame:
