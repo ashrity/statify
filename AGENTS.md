@@ -76,6 +76,7 @@ Computed metrics, derived from data already stored rather than fetched:
 
 - Team defense by position and play type: `uv run statify compute defense --season <year> [--week <n>]`
 - Defensive matchup factors: `uv run statify compute matchup --season <year>`
+- Defensive tendencies: `uv run statify compute tendencies --season <year>` (2016 or later)
 - Offensive pace and PROE: `uv run statify compute tempo --season <year> [--week <n>]`
 - Player usage shares: `uv run statify compute usage --season <year> [--week <n>]`
 - Player efficiency: `uv run statify compute efficiency --season <year> [--week <n>]`
@@ -142,6 +143,30 @@ rather than a ratio, because EPA per play crosses zero. It emits a row for every
 bucket the season contains for every week a defense played, not only the buckets
 that came up that week, so a factor can always be looked up; a defense that has
 never faced a bucket gets a row with NULLs rather than no row at all.
+
+`compute tendencies` is the other half of the matchup and the only `compute`
+that ranks nobody. It stores what a defense *does*: man rate, blitz rate, pass
+rushers per snap, sack rate and QB hit rate, per week and over the last 3, last
+5 and season to date. A man-heavy defense is not a worse defense, so there is no
+league baseline here, unlike `compute matchup`. It reads nflverse directly
+rather than a stored table, so it depends on no other command.
+
+**This `man_rate` is not comparable to a published one.** Measured on 2024 the
+league figure here is 48.5%, where Next Gen Stats and PFF both report nearer 30
+to 35%: they chart to different definitions, the same situation as `yacoe`. Only
+compare a man rate from this table to another from this table. What survives the
+gap is the ordering, and the ordering is right: Minnesota tops blitz rate at
+40.0%, Green Bay is the league's most zone-heavy at 32.1% man, and Denver leads
+both man coverage at 61.1% and sacks at 8.8%.
+
+Its three rates use three different denominators, because the feeds cover
+different plays: man over `coverage_snaps`, blitz and rushers over
+`rusher_snaps`, sacks and hits over `dropbacks`. They fail independently too.
+Four team-weeks in 2024, all in week 7, have full coverage charting and no
+pass-rusher counts at all; those rows keep their man and sack rates and carry
+NULL only in the blitz columns. `coverage_snaps` is also the sample size and
+runs from 14 to 63 across a team-week, so read it before trusting a single
+week's rate.
 
 `compute usage` reads `weekly_actuals`, so re-run it after anything that writes
 that table: `ingest weekly`, `ingest snaps`, `ingest redzone`, or `ingest

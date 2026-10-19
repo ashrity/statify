@@ -22,6 +22,7 @@ from statify.ingest import (
     routes,
     snaps,
     tempo,
+    tendency,
     usage,
     weather,
     weekly,
@@ -322,6 +323,17 @@ def _cmd_compute_matchup(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_tendencies(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows, no_prior, skipped = tendency.load_tendencies(conn, args.season)
+
+    print(f"{rows} team/week tendency rows for {args.season}")
+    print(f"{no_prior} are a defense's first game, with no prior weeks to average")
+    for reason, count in skipped.most_common():
+        print(f"  {count:>6}  charting rows skipped: {reason}")
+    return 0
+
+
 def _cmd_compute_form(args: argparse.Namespace) -> int:
     with connection() as conn:
         counts = form.load_form(conn, args.season)
@@ -493,6 +505,10 @@ def build_parser() -> argparse.ArgumentParser:
     matchup_cmd = computations.add_parser("matchup", help="defense strength relative to league")
     matchup_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     matchup_cmd.set_defaults(func=_cmd_compute_matchup)
+
+    tendencies_cmd = computations.add_parser("tendencies", help="defensive coverage and pass rush tendencies")
+    tendencies_cmd.add_argument("--season", type=int, required=True, help="season year, 2016 or later")
+    tendencies_cmd.set_defaults(func=_cmd_compute_tendencies)
 
     form_cmd = computations.add_parser("form", help="trailing usage form entering each week")
     form_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
