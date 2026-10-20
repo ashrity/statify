@@ -131,6 +131,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Trailing form: `uv run statify compute form --season <year>`
 - Expected team volume: `uv run statify compute volume --season <year> [--week <n>]`
 - Expected player opportunity: `uv run statify compute opportunity --season <year> [--week <n>]`
+- Expected player efficiency: `uv run statify compute expected-efficiency --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -382,6 +383,44 @@ minimum, so `TARGETS_OWN_WEIGHT` and `CARRIES_OWN_WEIGHT` ship at the round
 0.5 and `ATTEMPTS_OWN_WEIGHT` at the round 0.2, the "round number inside the
 flat region" judgement call `RUSH_OWN_WEIGHT` already made, rather than one
 season's argmin.
+
+`compute expected-efficiency` reuses `player_opportunity_weekly`'s row set
+(feature 15b) rather than re-deriving which (player, week) pairs are worth
+projecting a second time, so it belongs after `compute opportunity` and
+refuses to run before that table is filled for the season.
+
+**It shrinks a rate, not a count, which is why it blends toward the league
+rate at the player's position rather than toward a team-level figure.** A
+player's own trailing yards per target, catch rate, yards per carry and yards
+per attempt are each blended against the league rate among every player at the
+same position over the same strictly-prior weeks: a RB's catch rate and a
+WR's catch rate are not draws from the same distribution, so pooling across
+positions would be the wrong baseline.
+
+**Unlike the volume tables, every rate here has a real minimum, not a flat
+curve.** Measured on 2024 weeks 6 to 18, mean absolute error per player-week
+against the actual realized rate that week:
+
+| weight | yards/target | catch rate | yards/carry | yards/attempt |
+| --- | --- | --- | --- | --- |
+| 0.0 | 4.2317 | 0.2484 | 2.4821 | 1.8591 |
+| 0.3 | 4.2063 | 0.2463 | 2.4310 | 1.8307 |
+| argmin | 4.2036 @ 0.2 | 0.2461 @ 0.4 | 2.4310 @ 0.3 | 1.8307 @ 0.3 |
+| 1.0 | 4.5190 | 0.2514 | 2.6567 | 2.0670 |
+
+Leaning entirely on a player's own trailing rate is the worst choice at every
+stat, and blending beats the position baseline alone too, by a smaller but
+real margin. All four argmins are already round numbers in 0.2 to 0.4, so
+`YARDS_PER_TARGET_OWN_WEIGHT` (0.2), `CATCH_RATE_OWN_WEIGHT` (0.4),
+`YARDS_PER_CARRY_OWN_WEIGHT` (0.3) and `YARDS_PER_ATTEMPT_OWN_WEIGHT` (0.3)
+ship as measured, with no "round number in a flat region" compromise needed.
+
+Each rate's sample size is tracked separately from `games_played`, as
+`receiving_opportunities`, `rushing_opportunities` and `passing_opportunities`:
+a player can have ten prior games and a yards-per-carry built from one of
+them, if the other nine were pass plays only. Read the opportunity count
+before trusting the rate, the same caveat `player_form_weekly.ryoe_games_l3`
+carries for rush yards over expected.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.

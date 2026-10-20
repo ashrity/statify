@@ -15,6 +15,7 @@ from statify.ingest import (
     depth,
     efficiency,
     environment,
+    expected_efficiency,
     forecast,
     form,
     injuries,
@@ -407,6 +408,22 @@ def _cmd_compute_opportunity(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_expected_efficiency(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = expected_efficiency.load_expected_efficiency(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} player/week expected efficiency rows for {args.season} {scope}")
+    print(
+        f"own weights: yards/target {expected_efficiency.YARDS_PER_TARGET_OWN_WEIGHT}, "
+        f"catch rate {expected_efficiency.CATCH_RATE_OWN_WEIGHT}, "
+        f"yards/carry {expected_efficiency.YARDS_PER_CARRY_OWN_WEIGHT}, "
+        f"yards/attempt {expected_efficiency.YARDS_PER_ATTEMPT_OWN_WEIGHT} "
+        "(the rest is the league rate at his position)"
+    )
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -643,6 +660,13 @@ def build_parser() -> argparse.ArgumentParser:
     opportunity_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     opportunity_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     opportunity_cmd.set_defaults(func=_cmd_compute_opportunity)
+
+    expected_efficiency_cmd = computations.add_parser(
+        "expected-efficiency", help="expected yards/target, catch rate, yards/carry and yards/attempt"
+    )
+    expected_efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    expected_efficiency_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    expected_efficiency_cmd.set_defaults(func=_cmd_compute_expected_efficiency)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
