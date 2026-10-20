@@ -135,6 +135,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Expected touchdowns and anytime-TD probability: `uv run statify compute touchdowns --season <year> [--week <n>]`
 - Matchup and environment multipliers: `uv run statify compute matchup-adjustment --season <year> [--week <n>]`
 - Combined raw stat projection: `uv run statify compute projection --season <year> [--week <n>]`
+- Store projections (history, append-only): `uv run statify compute generate-projections --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -560,6 +561,37 @@ a player's stored `exp_targets` in `player_opportunity_weekly` for one week on
 a scratch copy and confirmed `receiving_yards` moved for that exact week
 (0.0 to 300.0) while the following week's row, built from a different stored
 row, did not move at all.
+
+`compute generate-projections` is the first command that writes `projections`,
+exactly as `project-overview.md` locks that table: a surrogate `id` key, not
+the composite `(player, season, week, ...)` key every table since feature 15a
+has used, because this table accumulates a history rather than holding one
+current row per key. It refuses to run before `compute projection` has, and
+copies `raw_projection` straight across as `projected_value`, stamped with a
+`model_version` code constant (`"v1"`). `market_line`, `prop_line_id`, `edge`
+and `confidence` are always `NULL` here: matching a market line and computing
+the edge is feature 21's job, confidence is feature 26's, and filling either
+in this loader would cross a boundary the build plan itself draws.
+
+**Content-based novelty, the same rule `ingest market` and `ingest forecast`
+already follow.** A re-run inserts a new row only when `projected_value`
+actually changed since the latest stored row for that player/week/stat_type/
+model_version; an unchanged re-run stores nothing. Without this, feature 25's
+weekly refresh would duplicate the whole table on every run that found
+nothing new, the exact mistake feature 7a made once already with 433 rows.
+Measured on 2024: the first run stored 42,560 rows (every
+`player_raw_projection_weekly` row with a non-`NULL` `raw_projection`, out of
+45,970 total); an immediate second run stored 0.
+
+Proven on a scratch copy: inflating one player's week-12 targets and
+receiving yards, then recomputing `compute opportunity` through
+`compute generate-projections`, left week 12's own row unchanged (append-only
+history means even its own stat type still shows exactly one row, since
+nothing about week 12's inputs changed from week 12's own perspective) while
+weeks 13 and 14, built from a now-different week 12, each gained a second row
+with a new `generated_at` and a materially different `projected_value`
+(33.62 to 119.06; 42.46 to 110.22). The real database was confirmed untouched
+afterward.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.

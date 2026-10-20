@@ -25,6 +25,7 @@ from statify.ingest import (
     ngs,
     opportunity,
     projection,
+    projections,
     props,
     reference,
     routes,
@@ -469,6 +470,16 @@ def _cmd_compute_projection(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_generate_projections(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = projections.generate_projections(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} new projection rows stored for {args.season} {scope} (model {projections.MODEL_VERSION})")
+    print("unchanged player/week/stat_type values store nothing; market_line/edge/confidence are NULL until features 21/26")
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -733,6 +744,13 @@ def build_parser() -> argparse.ArgumentParser:
     projection_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     projection_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     projection_cmd.set_defaults(func=_cmd_compute_projection)
+
+    generate_projections_cmd = computations.add_parser(
+        "generate-projections", help="store feature 19's raw projection into the projections history table"
+    )
+    generate_projections_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    generate_projections_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    generate_projections_cmd.set_defaults(func=_cmd_compute_generate_projections)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
