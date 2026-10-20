@@ -11,6 +11,7 @@ from statify.db import connection
 from statify.sources import open_meteo
 from statify.ingest.common import utc_now, write, write_all
 from statify.ingest import (
+    accuracy,
     backtest,
     defense,
     depth,
@@ -502,6 +503,16 @@ def _cmd_compute_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_accuracy(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = accuracy.load_model_error(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} season/week/stat-type/model-version accuracy rows for {args.season} {scope}")
+    print("beat_line_rate is over beat_line_n (non-NULL rows only), never over n")
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -783,6 +794,11 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     backtest_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     backtest_cmd.set_defaults(func=_cmd_compute_backtest)
+
+    accuracy_cmd = computations.add_parser("accuracy", help="aggregate backtest_results into MAE/RMSE per week")
+    accuracy_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    accuracy_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    accuracy_cmd.set_defaults(func=_cmd_compute_accuracy)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")

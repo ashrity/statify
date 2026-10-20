@@ -138,6 +138,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Store projections (history, append-only): `uv run statify compute generate-projections --season <year> [--week <n>]`
 - Match market lines and calculate the edge: `uv run statify compute edge --season <year> [--week <n>]`
 - Backtest projections against actual results: `uv run statify compute backtest --season <year> [--week <n>]`
+- Aggregate MAE/RMSE per week: `uv run statify compute accuracy --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -668,6 +669,30 @@ Measured on 2024 (every stat type, full season), mean absolute error between
 A week not yet played gets no row at all, proven directly: 2026 week 7
 (unplayed as of this build) produced 0 backtest rows while weeks 1-6
 (already played) produced 7,805.
+
+`compute accuracy` aggregates `backtest_results` into `model_error_weekly`,
+one row per `(season, week, stat_type, model_version)`: sample size, MAE,
+RMSE, and the `beat_line` hit rate. No table for this is locked in
+`project-overview.md`, unlike every table since feature 15b; it was designed
+fresh, stored per week rather than only per season because feature 29's
+"running accuracy report showing performance trend over time" needs a row
+per week to trend across. It recomputes in place (upsert) rather than
+appending, the shape every `compute` table in this project takes except
+`projections` itself.
+
+**`beat_line_rate`'s denominator is `beat_line_n`, never `n`.** A push
+(`backtest_results.beat_line IS NULL`) is neither a hit nor a miss, and
+averaging it in as a 0 would understate the rate exactly where the market
+and the model agreed to the point of a tie. A group with no non-`NULL`
+`beat_line` rows gets `beat_line_rate = NULL`, not a division by zero or a
+fabricated 0. On 2024, every row's `beat_line_rate` is `NULL`, the same
+reason `compute edge` and `compute backtest` are both data-starved there:
+no `prop_lines` exist for that season at all.
+
+A spot-checked 2024 row (week 2, `receiving_yards`, n=368) reproduced
+exactly from an independent recomputation against the underlying
+`backtest_results` rows: MAE 14.8218, RMSE 24.4533, matching to the last
+stored digit.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.
