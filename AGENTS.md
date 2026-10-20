@@ -129,6 +129,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Player usage shares: `uv run statify compute usage --season <year> [--week <n>]`
 - Player efficiency: `uv run statify compute efficiency --season <year> [--week <n>]`
 - Trailing form: `uv run statify compute form --season <year>`
+- Expected team volume: `uv run statify compute volume --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -298,6 +299,47 @@ expected and YAC over expected and nothing else.
 
 `compute form` takes no `--week`: a week's form is built from every earlier week,
 so the season is the unit.
+
+`compute volume` is the first command that predicts rather than records. It
+reads `weekly_actuals` and `games` only, so it needs no feature table and sits
+outside the usage/efficiency/form chain.
+
+**Its rows follow the schedule, not the results.** The row worth having is for
+the week nobody has played yet, so an unplayed week gets an expectation built
+from everything before it. Re-run it after each week to refresh the later ones.
+A team on a bye has no game and so has no row, which is why 2024 has 570 rows
+rather than 32 times 22.
+
+**Week 1 is entirely NULL and that is the answer, not a bug.** Nobody has
+played, so there is no team rate and no league rate either. Feature 30's
+cross-season shrinkage is what would fill it.
+
+**Passing volume and rushing volume want opposite treatment**, which is the
+measurement the table exists to encode. On 2024 weeks 6 to 18, mean absolute
+error per team-week:
+
+| | own last 3 | own season | league mean | shipped |
+| --- | --- | --- | --- | --- |
+| targets | 6.186 | 5.913 | 5.720 | **5.667** |
+| pass attempts | 6.502 | 6.177 | 5.949 | **5.890** |
+| carries | 6.267 | 5.862 | 6.312 | **5.864** |
+
+A team's passing volume is barely a team property: the league mean beats the
+team's own season, so `PASS_OWN_WEIGHT` is 0.3. Rushing volume is one: there
+the league mean is the worst of the four, so `RUSH_OWN_WEIGHT` is 0.8. That is
+game script, not noise. Teams pass because they are behind, which belongs to
+the game; they run because they choose to, which belongs to the offence.
+
+`RUSH_OWN_WEIGHT` is deliberately not the measured argmin of 0.90: the rush
+curve is flat from 0.7 to 1.0 while the pass curve moves eight times as much
+across the same range, so one season's argmin is noise. Both weights are stored
+as columns on every row, like `ewma_half_life` on `player_form_weekly`, so a
+retune cannot leave stored rows disagreeing with the code that reads them.
+
+Opponent adjustment was measured and rejected here: it made targets clearly
+worse (5.667 to 6.021). Market inputs were left out because
+`game_environment_weekly` exists for 2026 only, where six weeks of actuals is
+no basis for fitting a weight. Feature 18 owns both.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.

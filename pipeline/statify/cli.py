@@ -28,6 +28,7 @@ from statify.ingest import (
     tempo,
     tendency,
     usage,
+    volume,
     weather,
     weekly,
 )
@@ -367,6 +368,19 @@ def _cmd_compute_tempo(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_volume(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = volume.load_team_volume(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} team/week volume rows for {args.season} {scope}")
+    print(
+        f"blend weights: pass {volume.PASS_OWN_WEIGHT}, rush {volume.RUSH_OWN_WEIGHT} "
+        "(own share; the rest is the league)"
+    )
+    return 0
+
+
 def _cmd_compute_usage(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_air_yards = usage.load_usage(conn, args.season, args.week)
@@ -597,6 +611,11 @@ def build_parser() -> argparse.ArgumentParser:
     tempo_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     tempo_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     tempo_cmd.set_defaults(func=_cmd_compute_tempo)
+
+    volume_cmd = computations.add_parser("volume", help="expected team targets, carries and attempts")
+    volume_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    volume_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    volume_cmd.set_defaults(func=_cmd_compute_volume)
 
     usage_cmd = computations.add_parser("usage", help="player share of team opportunity")
     usage_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
