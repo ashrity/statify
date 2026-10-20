@@ -51,6 +51,7 @@ Data pipeline, all run from `pipeline/`:
 - Weather forecasts for upcoming games: `uv run statify ingest forecast --season <year> [--week <n>] [--dry-run]`
 - Player prop lines: `uv run statify ingest props --season <year> --week <n> [--dry-run]`
 - Prop identity audit: `uv run statify props audit --season <year> --week <n> [--dry-run]`
+- Mark closing lines: `uv run statify props close --season <year> --week <n>`
 - Team spreads and totals: `uv run statify ingest market --season <year> [--week <n>] [--dry-run]`
 - Tests: `uv run pytest`
 
@@ -69,7 +70,7 @@ two different endpoints are involved:
 
 | Command | Endpoint | Measured cost |
 | --- | --- | --- |
-| `ingest props`, `props audit` | per event | markets times events, about **64 a week** |
+| `ingest props`, `props audit` | per event | markets times events, up to about **80 a week** |
 | `ingest market` | bulk | **2**, for the whole slate |
 
 Player props are not served by the bulk endpoint, which is the only reason
@@ -77,6 +78,27 @@ feature 7a pays per game. Team markets are, and the bulk price is one credit per
 market however many games come back, so `ingest market --week 7` costs exactly
 what omitting `--week` costs: **`--week` narrows what is stored, never what is
 fetched**. Do not carry the props mental model across.
+
+`ingest props` covers **five** markets: the four over/under lines plus
+**anytime touchdown**, which is binary. That market quotes a price on the event
+happening rather than a number to beat, so its outcomes carry no `point` at
+all; a `Yes` price is stored as `over_odds` against a `line` of **0.5**, which
+is literally what "anytime" means, and `under_odds` stays NULL because books
+post no `No` side. Measured on 2026 week 7: 110 rows, 6 books, odds from -200
+to +1100.
+
+**The credit estimate is an upper bound, not a prediction.** Cost is markets
+times events only when every event has lines posted. A week 7 slate estimated
+at 70 cost **21** three days out, because books post player props game by game
+as kickoff nears and only 2 of 14 events had any. Capturing early is cheap and
+incomplete; capturing near kickoff costs the full amount and gets everything.
+
+`props close` marks `is_closing` on the last capture before kickoff, per player,
+stat type and book. It writes no new rows, makes no request and spends nothing.
+**It only marks games that have already kicked off**, because which capture
+closed a line is unknowable while a later one may still arrive, and it clears
+and re-sets in one transaction so a line that moved late cannot leave two rows
+marked. Feature 28 measures against these rows and nothing else.
 
 Against a 500 a month free tier that makes one props capture per week the
 binding constraint, while market captures are effectively free. All three take

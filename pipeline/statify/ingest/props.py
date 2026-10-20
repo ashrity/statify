@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 import sqlite3
 import unicodedata
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Generational suffixes are inconsistent between feeds: a book may write
 # "Michael Pittman Jr." where the roster says "Michael Pittman". Dropping the
@@ -33,6 +33,21 @@ MARKET_STAT_TYPES = {
     "player_reception_yds": "receiving_yards",
     "player_receptions": "receptions",
 }
+
+# Binary markets, which quote a price on an event happening rather than a
+# number to go over. Their outcomes carry no `point` at all, so the over/under
+# builder skips every one of them: adding a market here without its own path
+# would spend credits and store nothing, with no error.
+BINARY_MARKET_STAT_TYPES = {
+    "player_anytime_td": "touchdowns",
+}
+
+ALL_MARKETS = sorted({*MARKET_STAT_TYPES, *BINARY_MARKET_STAT_TYPES})
+
+# "Anytime" pays on one touchdown or more, which is literally over 0.5. Storing
+# the threshold rather than NULL keeps every row in prop_lines the same shape,
+# so feature 21 does not need a special case to know what the number means.
+ANYTIME_LINE = 0.5
 
 
 def normalize_name(name: str | None) -> str:
@@ -137,7 +152,9 @@ def outcome_names(payload: dict) -> list[str]:
     names: list[str] = []
     for book in payload.get("bookmakers", []):
         for market in book.get("markets", []):
-            if market.get("key") not in MARKET_STAT_TYPES:
+            # Both maps, or the audit reports a match rate for four markets
+            # while ingest pays for five and stores names the audit never saw.
+            if market.get("key") not in ALL_MARKETS:
                 continue
             for outcome in market.get("outcomes", []):
                 if outcome.get("description"):
@@ -152,10 +169,14 @@ CREDIT_FLOOR = 50
 
 
 def estimate_credits(event_count: int, market_count: int) -> int:
-    """Credits a run will cost.
+    """Credits a run will cost, as an upper bound.
 
-    Measured against the live API: cost is markets times events, and neither the
-    region count nor the number of books returned changes it.
+    Measured against the live API: cost is markets times events, and neither
+    the region count nor the number of books returned changes it. It is an
+    upper bound rather than a prediction, because a market the provider
+    returns nothing for does not appear to be billed. A week 7 slate estimated
+    at 70 cost 21 three days out, when only 2 of 14 events had lines posted.
+    Over-estimating is the safe direction for a budget guard.
     """
     return event_count * market_count
 
@@ -195,6 +216,45 @@ ON CONFLICT(player_id, game_id, stat_type, book, captured_at) DO UPDATE SET
 """
 
 
+def binary_rows(
+    market: dict,
+    book_key: str,
+    stat_type: str,
+    matched: dict[str, str],
+    identity: dict,
+) -> list[dict]:
+    """Rows for a market that quotes a price rather than a number.
+
+    Keyed by player alone, because there is no point to group on. Measured on
+    the live feed, only a `Yes` side is posted, so `under_odds` is usually
+    NULL; `No` is handled anyway because a missing side is already a
+    representable state and handling it costs nothing.
+    """
+    sides: dict[str, dict] = {}
+    for outcome in market.get("outcomes", []):
+        player_id = matched.get(outcome.get("description", ""))
+        if player_id is None:
+            continue
+        row = sides.setdefault(
+            player_id,
+            {
+                "player_id": player_id,
+                "stat_type": stat_type,
+                "book": book_key,
+                "line": ANYTIME_LINE,
+                "over_odds": None,
+                "under_odds": None,
+                "updated_at": identity["captured_at"],
+                **identity,
+            },
+        )
+        if outcome.get("name") == "Yes":
+            row["over_odds"] = outcome.get("price")
+        elif outcome.get("name") == "No":
+            row["under_odds"] = outcome.get("price")
+    return list(sides.values())
+
+
 def prop_rows(
     payload: dict,
     game_id: str,
@@ -218,6 +278,17 @@ def prop_rows(
     rows: list[dict] = []
     for book in payload.get("bookmakers", []):
         for market in book.get("markets", []):
+            binary_type = BINARY_MARKET_STAT_TYPES.get(market.get("key"))
+            if binary_type is not None:
+                rows.extend(
+                    binary_rows(
+                        market, book["key"], binary_type, matched,
+                        {"game_id": game_id, "season": season, "week": week,
+                         "captured_at": captured_at},
+                    )
+                )
+                continue
+
             stat_type = MARKET_STAT_TYPES.get(market.get("key"))
             if stat_type is None:
                 continue
@@ -282,3 +353,73 @@ def is_new_capture(row: dict, latest: dict[tuple, tuple]) -> bool:
     if previous is None:
         return True
     return (row["line"], row["over_odds"], row["under_odds"]) != previous
+
+
+def closing_ids(captures: list[dict], kickoff: datetime) -> set[int]:
+    """Which captures were the last before kickoff, one per player, stat and book.
+
+    Strictly before. A line posted during or after a game is not what the
+    market thought beforehand, and feature 28 measures a projection against
+    beforehand.
+
+    Each book is judged on its own history. Taking a single latest row per
+    player and stat would let whichever book published last mask every other
+    book's closing number.
+    """
+    best: dict[tuple, tuple[str, int]] = {}
+    for row in captures:
+        if _parse_utc(row["captured_at"]) >= kickoff:
+            continue
+        key = (row["player_id"], row["stat_type"], row["book"])
+        current = best.get(key)
+        if current is None or row["captured_at"] > current[0]:
+            best[key] = (row["captured_at"], row["id"])
+    return {row_id for _, row_id in best.values()}
+
+
+CLEAR_CLOSING = "UPDATE prop_lines SET is_closing = 0 WHERE game_id = :game_id"
+SET_CLOSING = "UPDATE prop_lines SET is_closing = 1 WHERE id = :id"
+
+CAPTURES_QUERY = """
+SELECT id, player_id, stat_type, book, captured_at
+FROM prop_lines WHERE game_id = ?
+"""
+
+
+def closing_plan(
+    conn: sqlite3.Connection, season: int, week: int
+) -> tuple[list[str], list[int], int]:
+    """Work out which captures closed each line, without writing anything.
+
+    Returns (games to clear, row ids to set, games not yet kicked off). This
+    module reads and computes; the command owns persistence, which is how the
+    rest of props.py is already shaped.
+
+    Clearing and setting belong to one transaction. A later capture arriving
+    before kickoff changes which row is closing, so only ever setting would
+    leave two rows marked for the same key and no way to tell which was real.
+
+    Nothing here makes a request: which capture closed a line is a fact about
+    rows already stored.
+    """
+    now = datetime.now(timezone.utc)
+    games = conn.execute(
+        "SELECT game_id, kickoff_at FROM games WHERE season = ? AND week = ?", (season, week)
+    ).fetchall()
+
+    played: list[str] = []
+    pending = 0
+    to_mark: set[int] = set()
+
+    for game_id, kickoff_at in games:
+        kickoff = _parse_utc(kickoff_at)
+        if kickoff > now:
+            pending += 1
+            continue
+        captures = [dict(row) for row in conn.execute(CAPTURES_QUERY, (game_id,))]
+        if not captures:
+            continue
+        played.append(game_id)
+        to_mark |= closing_ids(captures, kickoff)
+
+    return played, sorted(to_mark), pending

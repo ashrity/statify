@@ -1,6 +1,12 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from statify.ingest.props import (
+    ALL_MARKETS,
+    closing_ids,
+    BINARY_MARKET_STAT_TYPES,
+    MARKET_STAT_TYPES,
     assert_within_budget,
     build_player_index,
     estimate_credits,
@@ -126,12 +132,14 @@ def test_rematch_picks_the_nearer_kickoff():
 
 
 def test_outcome_names_ignores_unmapped_markets():
+    """player_anytime_td used to be the example here. Feature 7b made it a
+    market we model, so the case needs one we genuinely do not."""
     payload = {
         "bookmakers": [
             {
                 "markets": [
                     {"key": "player_receptions", "outcomes": [{"description": "A"}]},
-                    {"key": "player_anytime_td", "outcomes": [{"description": "B"}]},
+                    {"key": "player_sacks", "outcomes": [{"description": "B"}]},
                 ]
             }
         ]
@@ -235,9 +243,11 @@ def test_unmatched_player_is_not_stored():
 
 
 def test_unmapped_market_is_skipped():
+    """A market we do not model at all. player_anytime_td used to be one of
+    these; feature 7b gave it a path, so the case needs a different market."""
     rows = prop_rows(payload([
         {"name": "Yes", "description": "A.J. Brown", "price": 165},
-    ], market="player_anytime_td"), "G1", 2026, 1, MATCHED, "U")
+    ], market="player_sacks"), "G1", 2026, 1, MATCHED, "U")
     assert rows == []
 
 
@@ -289,3 +299,161 @@ def test_a_different_book_is_tracked_separately():
     row = line_row()
     row["book"] = "fanduel"
     assert is_new_capture(row, LATEST) is True
+
+
+# --- the binary touchdown market (feature 7b) -------------------------------
+
+
+def td_payload(outcomes, book="draftkings"):
+    return {"bookmakers": [{"key": book, "markets": [
+        {"key": "player_anytime_td", "outcomes": outcomes}]}]}
+
+
+def test_a_yes_outcome_becomes_an_over_price_at_half_a_touchdown():
+    """point is None on every outcome, which the over/under builder drops."""
+    rows = prop_rows(td_payload([
+        {"name": "Yes", "description": "A.J. Brown", "price": 125, "point": None},
+    ]), "G1", 2026, 1, MATCHED, "U")
+    assert len(rows) == 1
+    assert rows[0]["stat_type"] == "touchdowns"
+    assert rows[0]["line"] == 0.5
+    assert rows[0]["over_odds"] == 125
+    assert rows[0]["under_odds"] is None
+
+
+def test_a_no_outcome_becomes_an_under_price():
+    rows = prop_rows(td_payload([
+        {"name": "Yes", "description": "A.J. Brown", "price": 125, "point": None},
+        {"name": "No", "description": "A.J. Brown", "price": -150, "point": None},
+    ]), "G1", 2026, 1, MATCHED, "U")
+    assert len(rows) == 1
+    assert (rows[0]["over_odds"], rows[0]["under_odds"]) == (125, -150)
+
+
+def test_one_row_per_player_not_per_outcome():
+    rows = prop_rows(td_payload([
+        {"name": "Yes", "description": "A.J. Brown", "price": 125, "point": None},
+        {"name": "Yes", "description": "Jaxon Smith-Njigba", "price": 150, "point": None},
+    ]), "G1", 2026, 1, MATCHED, "U")
+    assert len(rows) == 2
+
+
+def test_an_unmatched_player_yields_no_row():
+    """The same refusal to guess that feature 7a built."""
+    rows = prop_rows(td_payload([
+        {"name": "Yes", "description": "Nobody At All", "price": 125, "point": None},
+    ]), "G1", 2026, 1, MATCHED, "U")
+    assert rows == []
+
+
+def test_each_book_keeps_its_own_price():
+    payload_two = {"bookmakers": [
+        {"key": "draftkings", "markets": [{"key": "player_anytime_td", "outcomes": [
+            {"name": "Yes", "description": "A.J. Brown", "price": 125, "point": None}]}]},
+        {"key": "fanduel", "markets": [{"key": "player_anytime_td", "outcomes": [
+            {"name": "Yes", "description": "A.J. Brown", "price": 140, "point": None}]}]},
+    ]}
+    rows = prop_rows(payload_two, "G1", 2026, 1, MATCHED, "U")
+    assert {r["book"]: r["over_odds"] for r in rows} == {"draftkings": 125, "fanduel": 140}
+
+
+def test_the_game_identity_is_stamped():
+    rows = prop_rows(td_payload([
+        {"name": "Yes", "description": "A.J. Brown", "price": 125, "point": None},
+    ]), "G1", 2026, 7, MATCHED, "CAPTURED")
+    assert rows[0]["game_id"] == "G1"
+    assert rows[0]["season"] == 2026 and rows[0]["week"] == 7
+    assert rows[0]["captured_at"] == "CAPTURED" and rows[0]["updated_at"] == "CAPTURED"
+
+
+def test_every_market_we_model_is_requested():
+    """The request list and the two maps must not drift: a market absent here
+    is never fetched, and one present with no mapping is paid for and dropped."""
+    assert set(ALL_MARKETS) == {*MARKET_STAT_TYPES, *BINARY_MARKET_STAT_TYPES}
+    assert "player_anytime_td" in ALL_MARKETS
+    assert len(ALL_MARKETS) == 5
+
+
+def test_the_two_market_maps_do_not_overlap():
+    """A market in both would take whichever branch is checked first."""
+    assert set(MARKET_STAT_TYPES) & set(BINARY_MARKET_STAT_TYPES) == set()
+
+
+def test_every_stat_type_is_one_the_schema_allows():
+    """prop_lines CHECKs stat_type, so an unlisted value fails at write time."""
+    allowed = {"passing_yards", "rushing_yards", "receiving_yards",
+               "receptions", "touchdowns"}
+    assert set(MARKET_STAT_TYPES.values()) | set(BINARY_MARKET_STAT_TYPES.values()) <= allowed
+
+
+# --- the closing rule (feature 7b) ------------------------------------------
+
+KICKOFF = datetime(2026, 9, 10, 0, 20, tzinfo=timezone.utc)
+
+
+def capture(row_id, captured, player="p1", stat="receptions", book="draftkings"):
+    return {"id": row_id, "player_id": player, "stat_type": stat,
+            "book": book, "captured_at": captured}
+
+
+def test_a_single_capture_is_the_closing_one():
+    assert closing_ids([capture(1, "2026-09-05T03:33:00+00:00")], KICKOFF) == {1}
+
+
+def test_the_latest_before_kickoff_wins_even_when_a_later_one_exists():
+    """Three captures, the middle one closing: the third is after kickoff."""
+    rows = [capture(1, "2026-09-05T00:00:00+00:00"),
+            capture(2, "2026-09-09T23:00:00+00:00"),
+            capture(3, "2026-09-10T01:00:00+00:00")]
+    assert closing_ids(rows, KICKOFF) == {2}
+
+
+def test_a_capture_after_kickoff_is_never_closing():
+    """A line posted during the game is not what the market thought before it."""
+    assert closing_ids([capture(1, "2026-09-10T02:00:00+00:00")], KICKOFF) == set()
+
+
+def test_a_capture_exactly_at_kickoff_is_excluded():
+    assert closing_ids([capture(1, "2026-09-10T00:20:00+00:00")], KICKOFF) == set()
+
+
+def test_everything_after_kickoff_leaves_nothing_marked():
+    rows = [capture(1, "2026-09-11T00:00:00+00:00"), capture(2, "2026-09-12T00:00:00+00:00")]
+    assert closing_ids(rows, KICKOFF) == set()
+
+
+def test_each_book_is_marked_independently():
+    """One book publishing late must not mask another book's closing number."""
+    rows = [capture(1, "2026-09-05T00:00:00+00:00", book="draftkings"),
+            capture(2, "2026-09-09T00:00:00+00:00", book="draftkings"),
+            capture(3, "2026-09-06T00:00:00+00:00", book="fanduel")]
+    assert closing_ids(rows, KICKOFF) == {2, 3}
+
+
+def test_each_stat_type_is_marked_independently():
+    rows = [capture(1, "2026-09-05T00:00:00+00:00", stat="receptions"),
+            capture(2, "2026-09-05T00:00:00+00:00", stat="touchdowns")]
+    assert closing_ids(rows, KICKOFF) == {1, 2}
+
+
+def test_each_player_is_marked_independently():
+    rows = [capture(1, "2026-09-05T00:00:00+00:00", player="p1"),
+            capture(2, "2026-09-05T00:00:00+00:00", player="p2")]
+    assert closing_ids(rows, KICKOFF) == {1, 2}
+
+
+def test_no_captures_mark_nothing():
+    assert closing_ids([], KICKOFF) == set()
+
+
+def test_the_audit_sees_binary_market_names_too():
+    """Otherwise it reports a match rate for four markets while ingest pays
+    for five, and a touchdown-only player looks like full coverage."""
+    payload_both = {"bookmakers": [{"key": "dk", "markets": [
+        {"key": "player_receptions", "outcomes": [
+            {"name": "Over", "description": "A.J. Brown", "point": 4.5}]},
+        {"key": "player_anytime_td", "outcomes": [
+            {"name": "Yes", "description": "Saquon Barkley", "price": -140}]},
+    ]}]}
+    assert set(outcome_names(payload_both)) == {"A.J. Brown", "Saquon Barkley"}
+

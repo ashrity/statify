@@ -9,7 +9,7 @@ from statify import migrate as migrations
 from statify.config import settings
 from statify.db import connection
 from statify.sources import open_meteo
-from statify.ingest.common import utc_now, write
+from statify.ingest.common import utc_now, write, write_all
 from statify.ingest import (
     defense,
     depth,
@@ -223,7 +223,7 @@ def _cmd_props_audit(args: argparse.Namespace) -> int:
         elif resolved[2] == args.week:
             slate.append((event, resolved))
 
-    markets = sorted(props.MARKET_STAT_TYPES)
+    markets = props.ALL_MARKETS
     print(f"season {args.season} week {args.week}")
     print(f"  {len(slate)} of {len(events)} events resolved to a game for this week")
     print(f"  {len(unresolved_events)} events could not be resolved at all")
@@ -266,6 +266,24 @@ def _cmd_props_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_props_close(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        played, ids, pending = props.closing_plan(conn, args.season, args.week)
+        # One transaction: clearing and setting must not be separable, or a
+        # crash between them leaves every line unmarked.
+        write_all(conn, [
+            (props.CLEAR_CLOSING, [{"game_id": g} for g in played]),
+            (props.SET_CLOSING, [{"id": i} for i in ids]),
+        ])
+
+    print(f"{len(ids)} closing lines marked across {len(played)} games")
+    if pending:
+        # Not an error. Which capture closed a line is unknowable until the
+        # game starts, because a later one may still arrive.
+        print(f"{pending} games have not kicked off, so their closing line is not yet known")
+    return 0
+
+
 def _cmd_ingest_props(args: argparse.Namespace) -> int:
     from statify.sources import odds_api
 
@@ -279,7 +297,7 @@ def _cmd_ingest_props(args: argparse.Namespace) -> int:
         if (resolved := props.resolve_event(event, team_abbrs, games)) is not None
         and resolved[2] == args.week
     ]
-    markets = sorted(props.MARKET_STAT_TYPES)
+    markets = props.ALL_MARKETS
     estimate = props.estimate_credits(len(slate), len(markets))
 
     print(f"season {args.season} week {args.week}")
@@ -555,6 +573,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit_cmd.add_argument("--week", type=int, required=True, help="week to audit")
     audit_cmd.add_argument("--dry-run", action="store_true", help="show cost and exit")
     audit_cmd.set_defaults(func=_cmd_props_audit)
+
+    close_cmd = props_sub.add_parser("close", help="mark the last capture before kickoff")
+    close_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
+    close_cmd.add_argument("--week", type=int, required=True, help="week to mark")
+    close_cmd.set_defaults(func=_cmd_props_close)
 
     props_ingest_cmd = datasets.add_parser("props", help="load player prop lines from The Odds API")
     props_ingest_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
