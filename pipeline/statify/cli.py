@@ -24,6 +24,7 @@ from statify.ingest import (
     matchup_environment,
     ngs,
     opportunity,
+    projection,
     props,
     reference,
     routes,
@@ -455,6 +456,19 @@ def _cmd_compute_matchup_environment(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_projection(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = projection.load_projections(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} player/week/stat-type raw projection rows for {args.season} {scope}")
+    print(
+        f"{len(projection.STAT_TYPES)} stat types per player-week: "
+        f"{', '.join(projection.STAT_TYPES)}"
+    )
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -712,6 +726,13 @@ def build_parser() -> argparse.ArgumentParser:
     matchup_environment_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     matchup_environment_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     matchup_environment_cmd.set_defaults(func=_cmd_compute_matchup_environment)
+
+    projection_cmd = computations.add_parser(
+        "projection", help="combined raw stat projection per player/week/stat type"
+    )
+    projection_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    projection_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    projection_cmd.set_defaults(func=_cmd_compute_projection)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")

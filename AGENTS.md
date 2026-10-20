@@ -134,6 +134,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Expected player efficiency: `uv run statify compute expected-efficiency --season <year> [--week <n>]`
 - Expected touchdowns and anytime-TD probability: `uv run statify compute touchdowns --season <year> [--week <n>]`
 - Matchup and environment multipliers: `uv run statify compute matchup-adjustment --season <year> [--week <n>]`
+- Combined raw stat projection: `uv run statify compute projection --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -508,6 +509,57 @@ by the time this reads them; its correctness check instead corrupts a stored
 matchup row directly and confirms the change lands only on the matching
 (opponent, week, position, play type) and never an adjacent week for the same
 opponent.
+
+`compute projection` assembles one raw projected value per player per week
+per stat type from four tables already built, with no new weight fitted: it
+is where "v1 weights set from domain research rather than learned"
+(`project-overview.md`) got spent, by features 15 through 18, not a fresh
+decision made here. It refuses to run before `compute opportunity`,
+`compute expected-efficiency`, `compute touchdowns` and
+`compute matchup-adjustment` have all run for the season.
+
+**Four stat types are a product; `touchdowns` is not.** `receiving_yards`,
+`receptions`, `rushing_yards` and `passing_yards` each multiply an
+opportunity count (feature 15b) by an efficiency rate (feature 16) by the
+matchup and environment multipliers (feature 18), with a `NULL` multiplier
+substituted as neutral (1.0) here and only here, which is the decision
+feature 18 explicitly left to its consumer. `touchdowns` is feature 17's
+`anytime_td_prob`, copied through undecorated: feature 7b's anytime-touchdown
+market prices a probability against a fixed 0.5 line, and no
+matchup/environment multiplier was ever measured against a probability, only
+against yards. `matchup_multiplier_used` and `environment_multiplier_used`
+record what was actually multiplied in, `NULL` for `touchdowns` since none
+applies, so a row's own arithmetic never needs the substitution rule
+re-derived from a second table.
+
+**No position gating anywhere**, the same convention `compute volume` and
+`compute usage` already follow: a `passing_yards` row for a WR who has never
+thrown a pass is `NULL` on its own, because his `exp_yards_per_attempt` has
+no prior data to be built from, not because this command excluded him.
+
+Measured end to end on 2024 weeks 6 to 18, 23,805 player-week-stat rows:
+
+| stat type | n | MAE (or Brier) | mean actual (or base rate) |
+| --- | --- | --- | --- |
+| receiving_yards | 4,761 | 13.038 | 19.088 |
+| receptions | 4,761 | 1.040 | 1.739 |
+| rushing_yards | 4,761 | 6.327 | 9.618 |
+| passing_yards | 3,313 | 9.397 | 27.133 |
+| touchdowns | 4,761 | Brier 0.1250 | base rate 0.169 (base-rate-only Brier 0.1405) |
+
+`touchdowns` is scored as a Brier score (mean squared error of the
+probability against 0 or 1, whether a touchdown actually occurred) rather
+than MAE, since `raw_projection` there is a probability, not a count; beating
+the base-rate-only Brier score (0.1250 against 0.1405) confirms the model
+carries real signal beyond "always predict the league average rate."
+
+This feature's own code also has no trailing window to leak across, the same
+situation as `compute matchup-adjustment`: it is a join and a multiply over
+tables that are each already strictly prior. Its correctness check corrupted
+a player's stored `exp_targets` in `player_opportunity_weekly` for one week on
+a scratch copy and confirmed `receiving_yards` moved for that exact week
+(0.0 to 300.0) while the following week's row, built from a different stored
+row, did not move at all.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.
