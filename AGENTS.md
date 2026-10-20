@@ -20,7 +20,7 @@ Statify.
 | Styling | Tailwind CSS v4 (CSS-first config in `app/globals.css`) |
 | Lint | ESLint 9 flat config (`eslint.config.mjs`), `eslint-config-next` |
 | Package manager | npm (`package-lock.json`) for the app, `uv` for `pipeline/` |
-| Database | SQLite at `data/statify.db`, numbered SQL migrations in `pipeline/migrations/` |
+| Database | SQLite at `data/statify.db`, numbered SQL migrations in `pipeline/migrations/`. Next.js reads it via `better-sqlite3` (`lib/db.ts`), a read-only singleton connection; the app never writes |
 | Auth | > TODO: none installed yet |
 | Tests | pytest, in `pipeline/` only. The Next.js app has no runner. |
 
@@ -677,6 +677,13 @@ evidence for a change.
   imports, or unused variables.
 - Comment the why, not the what. No banner blocks or narration of obvious code.
 - No em dashes in generated content (docs, comments, commit messages).
+
+Routes (confirmed at feature 22, `project-overview.md`'s UI/UX section):
+`/` is the weekly projections board, the only one built so far.
+`/player/[id]` and `/accuracy` are named placeholders for features 23/24/29,
+not yet built. Pages read `lib/db.ts`'s connection directly in async server
+components (`await searchParams`, which is a Promise in this Next.js
+version); there is no API route layer for this data and none is planned.
 
 ## Working style
 
