@@ -133,6 +133,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Expected player opportunity: `uv run statify compute opportunity --season <year> [--week <n>]`
 - Expected player efficiency: `uv run statify compute expected-efficiency --season <year> [--week <n>]`
 - Expected touchdowns and anytime-TD probability: `uv run statify compute touchdowns --season <year> [--week <n>]`
+- Matchup and environment multipliers: `uv run statify compute matchup-adjustment --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -467,6 +468,46 @@ the position washes out exactly the signal that matters here.
 probability of at least one touchdown, using only the standard library's
 `math.exp`; it is `None` whenever `exp_touchdowns` is, never backfilled with a
 guess.
+
+`compute matchup-adjustment` stops at the multiplier rather than applying it:
+the opportunity-times-efficiency baseline it would multiply does not exist
+until feature 19 builds it, which is also where these multipliers get spent.
+It reuses `player_opportunity_weekly`'s row set and refuses to run before
+that table is filled, the same dependency `compute expected-efficiency` and
+`compute touchdowns` have. It also reads `team_matchup_weekly` (feature 13a)
+and `game_environment_weekly` (feature 14a) for the opponent's defensive
+matchup and the game's pace, so both need to have been computed for the
+season; **`compute environment` had only ever been run for 2026** before this
+feature needed it for 2024 too, which is an operational gap, not a structural
+one, since the command already works for any season.
+
+**Every multiplier is centered at 1.0** (`1 + k * factor`), so a league-average
+matchup or league-average pace changes nothing. Measured on 2024 weeks 6 to
+18, mean absolute error per player-week against actual yardage, baselined on
+opportunity times efficiency:
+
+| k or m | pass matchup | rush matchup | environment |
+| --- | --- | --- | --- |
+| 0.0 | 15.5468 | 12.9706 | 18.6523 |
+| 0.5 | 15.6223 | 12.9300 | 18.6650 |
+| 3.0 | 17.5630 | 14.8734 | 18.8334 |
+
+**Pass matchup and environment (pace) were measured and rejected**, the same
+honest outcome feature 15a found measuring opponent adjustment on team
+volume: both get monotonically worse as the constant rises away from zero, so
+`PASS_MATCHUP_K` and `ENVIRONMENT_M` ship at 0.0, meaning no adjustment beat
+any adjustment tried. **Rush matchup is different**: 0.5 is a genuine interior
+minimum, not a boundary artifact, so `RUSH_MATCHUP_K` ships at the measured
+0.5. A `NULL` multiplier (a defense's first time facing a position/play-type,
+or a week with no trailing pace) is never defaulted to neutral here; that
+substitution, if wanted, is feature 19's decision to make.
+
+This table's own code has no trailing window of its own to leak across, since
+`team_matchup_weekly` and `game_environment_weekly` are already strictly prior
+by the time this reads them; its correctness check instead corrupts a stored
+matchup row directly and confirms the change lands only on the matching
+(opponent, week, position, play type) and never an adjacent week for the same
+opponent.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.

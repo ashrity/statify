@@ -21,6 +21,7 @@ from statify.ingest import (
     injuries,
     market,
     matchup,
+    matchup_environment,
     ngs,
     opportunity,
     props,
@@ -439,6 +440,21 @@ def _cmd_compute_touchdowns(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_matchup_environment(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = matchup_environment.load_matchup_environment(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} player/week matchup-environment rows for {args.season} {scope}")
+    print(
+        f"constants: pass k={matchup_environment.PASS_MATCHUP_K}, "
+        f"rush k={matchup_environment.RUSH_MATCHUP_K}, "
+        f"environment m={matchup_environment.ENVIRONMENT_M}; "
+        "a NULL multiplier means no matchup/pace data was available, not neutral"
+    )
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -689,6 +705,13 @@ def build_parser() -> argparse.ArgumentParser:
     touchdowns_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     touchdowns_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     touchdowns_cmd.set_defaults(func=_cmd_compute_touchdowns)
+
+    matchup_environment_cmd = computations.add_parser(
+        "matchup-adjustment", help="matchup and environment multipliers for feature 19"
+    )
+    matchup_environment_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    matchup_environment_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    matchup_environment_cmd.set_defaults(func=_cmd_compute_matchup_environment)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
