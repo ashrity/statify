@@ -136,6 +136,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Matchup and environment multipliers: `uv run statify compute matchup-adjustment --season <year> [--week <n>]`
 - Combined raw stat projection: `uv run statify compute projection --season <year> [--week <n>]`
 - Store projections (history, append-only): `uv run statify compute generate-projections --season <year> [--week <n>]`
+- Match market lines and calculate the edge: `uv run statify compute edge --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -592,6 +593,40 @@ weeks 13 and 14, built from a now-different week 12, each gained a second row
 with a new `generated_at` and a materially different `projected_value`
 (33.62 to 119.06; 42.46 to 110.22). The real database was confirmed untouched
 afterward.
+
+`compute edge` writes `market_line`, `prop_line_id` and `edge` onto existing
+`projections` rows, the three columns feature 20 left `NULL` for exactly this
+command to fill. It is the one command in this pipeline that updates rows in
+place rather than inserting or upserting, and it is still compatible with
+feature 20's append-only design: `projected_value` and `generated_at`, the
+row's identity, never change here, and a row already matched
+(`market_line IS NOT NULL`) is never revisited, so a later, newer capture
+never retroactively changes what an earlier projection was scored against.
+
+**The match is temporal, not just by key.** For a given (player, season,
+week, stat_type), the match is the `prop_lines` row with the latest
+`captured_at` at or before the projection's own `generated_at`, so a
+projection generated Tuesday is never scored against a line not captured
+until Thursday. This is the same strictly-prior instinct every earlier
+feature applies to weeks, extended to a second clock: the order two
+independent processes actually ran in. Ties at the same instant break on
+`prop_lines.id`, since there is no preferred-book concept anywhere in this
+project yet.
+
+**No consensus across books.** `team_market_data` and
+`game_environment_weekly` compute a median across books for team-level
+lines; nothing here does that for player props, matching the locked
+`projections` schema's single `prop_line_id`. One capture, temporally
+correct, is the whole scope; a consensus version is a retune candidate.
+
+**2024 has no `prop_lines` rows at all** (historical odds are a paid tier),
+and 2026 week 1 has lines but no matching projections (week 1 is entirely
+`NULL` per feature 15a's rule), so 2026 week 7 is the only place this could
+be measured against real data: 68 rows matched across all five stat types,
+reproducing `edge = projected_value - market_line` exactly on every one,
+including `touchdowns`, where the arithmetic is probability minus the fixed
+0.5 line (one row: projected 0.0147, edge -0.4853) rather than a yardage
+difference.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.

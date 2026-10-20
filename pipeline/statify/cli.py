@@ -13,6 +13,7 @@ from statify.ingest.common import utc_now, write, write_all
 from statify.ingest import (
     defense,
     depth,
+    edge,
     efficiency,
     environment,
     expected_efficiency,
@@ -480,6 +481,16 @@ def _cmd_compute_generate_projections(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_edge(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = edge.load_edges(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} projection rows matched to a market line and scored for {args.season} {scope}")
+    print("match is temporal: the latest prop_lines capture at or before each projection's own generated_at")
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -751,6 +762,11 @@ def build_parser() -> argparse.ArgumentParser:
     generate_projections_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     generate_projections_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     generate_projections_cmd.set_defaults(func=_cmd_compute_generate_projections)
+
+    edge_cmd = computations.add_parser("edge", help="match projections to market lines and calculate the edge")
+    edge_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
+    edge_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    edge_cmd.set_defaults(func=_cmd_compute_edge)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
