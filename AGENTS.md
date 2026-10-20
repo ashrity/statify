@@ -132,6 +132,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Expected team volume: `uv run statify compute volume --season <year> [--week <n>]`
 - Expected player opportunity: `uv run statify compute opportunity --season <year> [--week <n>]`
 - Expected player efficiency: `uv run statify compute expected-efficiency --season <year> [--week <n>]`
+- Expected touchdowns and anytime-TD probability: `uv run statify compute touchdowns --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -421,6 +422,51 @@ a player can have ten prior games and a yards-per-carry built from one of
 them, if the other nine were pass plays only. Read the opportunity count
 before trusting the rate, the same caveat `player_form_weekly.ryoe_games_l3`
 carries for rush yards over expected.
+
+`compute touchdowns` is a separate model from `compute expected-efficiency`,
+on purpose: a player scores 0, 1 or rarely 2 touchdowns in a game, a shape a
+Poisson distribution fits far better than the continuous yardage rates the
+efficiency table blends. It reuses `player_opportunity_weekly`'s row set and
+its `exp_targets`/`exp_carries` the same way `compute expected-efficiency`
+does, so it belongs after `compute opportunity` and refuses to run before
+that table is filled.
+
+**There is no red-zone volume projection here, deliberately.** `red_zone_touches`
+is a stronger scoring signal than total volume, but no feature projects
+expected red-zone touches: feature 15b stops at targets, carries, attempts
+and routes. Building that whole second volume pipeline for one feature would
+be exactly the unmeasured scope creep features 15a and 15b both declined, so
+`exp_rushing_tds` and `exp_receiving_tds` multiply a TD rate by the volume
+that already exists. A red-zone-touch-share version is a retune candidate for
+feature 30 or 31.
+
+**Shrinking a touchdown rate toward the position is the opposite finding from
+the yardage rates.** Measured on 2024 weeks 6 to 18, mean absolute error per
+player-week against the actual realized rate that week:
+
+| weight | rushing TD rate | receiving TD rate |
+| --- | --- | --- |
+| 0.0 | 0.05168 | 0.07597 |
+| 0.8 | 0.04965 | 0.07510 |
+| argmin | 0.04929 @ 1.0 | 0.07509 @ 0.9 |
+| 1.0 | 0.04929 | 0.07510 |
+
+Both curves improve monotonically with the own-weight, where the yardage
+rates in `compute expected-efficiency` clearly favored the position. A
+boundary argmin from one season's grid is the textbook overfitting signal,
+so neither weight ships at the literal edge: `RUSHING_TD_RATE_OWN_WEIGHT` and
+`RECEIVING_TD_RATE_OWN_WEIGHT` both ship at the round 0.8, inside each curve's
+flat high-weight plateau, the same judgement `RUSH_OWN_WEIGHT` makes in
+`team_volume_weekly`. A touchdown role (goal-line back, slot-fade target)
+likely varies more within a position than yardage efficiency does, so pooling
+the position washes out exactly the signal that matters here.
+
+`exp_touchdowns` (the sum of both phases) reproduced an end-to-end MAE of
+0.267 against actual combined touchdowns that week, over the same 4,761 rows.
+`anytime_td_prob` is `1 - exp(-exp_touchdowns)`, the standard Poisson tail
+probability of at least one touchdown, using only the standard library's
+`math.exp`; it is `None` whenever `exp_touchdowns` is, never backfilled with a
+guess.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.

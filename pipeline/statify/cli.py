@@ -29,6 +29,7 @@ from statify.ingest import (
     snaps,
     tempo,
     tendency,
+    touchdowns,
     usage,
     volume,
     weather,
@@ -424,6 +425,20 @@ def _cmd_compute_expected_efficiency(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_touchdowns(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = touchdowns.load_touchdowns(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} player/week touchdown rows for {args.season} {scope}")
+    print(
+        f"own weights: rushing {touchdowns.RUSHING_TD_RATE_OWN_WEIGHT}, "
+        f"receiving {touchdowns.RECEIVING_TD_RATE_OWN_WEIGHT} "
+        "(the rest is the league TD rate at his position); anytime_td_prob is the Poisson tail"
+    )
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -667,6 +682,13 @@ def build_parser() -> argparse.ArgumentParser:
     expected_efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     expected_efficiency_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     expected_efficiency_cmd.set_defaults(func=_cmd_compute_expected_efficiency)
+
+    touchdowns_cmd = computations.add_parser(
+        "touchdowns", help="expected rushing/receiving touchdowns and anytime-TD probability"
+    )
+    touchdowns_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    touchdowns_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    touchdowns_cmd.set_defaults(func=_cmd_compute_touchdowns)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
