@@ -139,6 +139,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Match market lines and calculate the edge: `uv run statify compute edge --season <year> [--week <n>]`
 - Backtest projections against actual results: `uv run statify compute backtest --season <year> [--week <n>]`
 - Aggregate MAE/RMSE per week: `uv run statify compute accuracy --season <year> [--week <n>]`
+- Weekly refresh, the whole pipeline in one command: `uv run statify refresh --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -693,6 +694,46 @@ A spot-checked 2024 row (week 2, `receiving_yards`, n=368) reproduced
 exactly from an independent recomputation against the underlying
 `backtest_results` rows: MAE 14.8218, RMSE 24.4533, matching to the last
 stored digit.
+
+`statify refresh --season <year> [--week <n>]` is the whole pipeline in one
+command: every `ingest` and `compute` step from this section, in the
+dependency order this file has been documenting one command at a time since
+feature 2, run through the same `cli.main` entry point each individual
+command already goes through. A failing step is caught and reported rather
+than raised, which is not optional: `ingest depth`, `ingest injuries`,
+`ingest routes` and `compute tendencies` all genuinely fail on 2026 (real
+exceptions confirmed directly: two different `polars.exceptions
+.ColumnNotFoundError`s and two `nflverse participation pull failed: Season
+must be between 2016 and 2025`), and a refresh that aborted on the first of
+those would never reach anything after it.
+
+**`redzone` runs after `snaps`, not before**, correcting what otherwise
+reads as a contradiction in this file: the ingest order list above says
+"weekly, redzone, ngs, snaps," but the specific note under `ingest snaps`
+says `redzone` must run after it, because `snaps` inserts rows for players
+who took snaps but recorded no stat, which `redzone` then needs to already
+exist in order to fill their red zone touches. The specific note is the one
+`refresh` follows.
+
+**`ingest props` is deliberately excluded**, along with `ingest teams` and
+`ingest stadiums`. Props spends metered, budget-constrained Odds API
+credits, the free tier's binding constraint by this file's own extensive
+accounting; "mid-week, then again near kickoff" is a human-timed spending
+decision, not something a refresh should make silently on every run. Teams
+and stadiums are static reference data set up once. `ingest market` stays
+in, at its documented 2-credits-for-the-whole-slate cost, since `refresh`'s
+real use is the current season, where that call is meaningful.
+
+**`ingest market` always hits the live board, regardless of season asked
+for**, which is worth knowing before testing `refresh` against a past
+season: a non-`--dry-run` call against, say, 2024 still fetches the
+*current* real-world slate (2026's games as of this writing), resolves zero
+of them to a 2024 game, and still spends the full 2 credits for nothing.
+This cost a real, if small, 2 credits during this feature's own build,
+testing the full orchestration against 2024 out of habit from every other
+feature's free historical test case. `--dry-run` on `ingest market` itself
+costs nothing and is the safer way to test `refresh`'s wiring without
+spending against a season that can never resolve.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.

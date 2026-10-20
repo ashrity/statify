@@ -10,6 +10,7 @@ from statify.config import settings
 from statify.db import connection
 from statify.sources import open_meteo
 from statify.ingest.common import utc_now, write, write_all
+from statify.refresh import run_refresh
 from statify.ingest import (
     accuracy,
     backtest,
@@ -592,6 +593,22 @@ def _format_size(num_bytes: int) -> str:
     return f"{num_bytes:.1f} GB"
 
 
+def _cmd_refresh(args: argparse.Namespace) -> int:
+    results = run_refresh(args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"refresh for {args.season} {scope}:")
+    for result in results:
+        status = "ok" if result.ok else f"FAILED: {result.error}"
+        print(f"  {result.label:<30} {status}")
+
+    failures = [r for r in results if not r.ok]
+    print(f"{len(results) - len(failures)} of {len(results)} steps ok")
+    if failures:
+        print(f"{len(failures)} step(s) failed; see above. Each step's own guard explains what to run first.")
+    return 0
+
+
 def _cmd_status(_args: argparse.Namespace) -> int:
     path = settings.db_path
     print(f"database   {path}")
@@ -828,6 +845,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_cmd = subcommands.add_parser("status", help="show database location and row counts")
     status_cmd.set_defaults(func=_cmd_status)
+
+    refresh_cmd = subcommands.add_parser(
+        "refresh", help="pull new data, recompute every feature, and regenerate projections"
+    )
+    refresh_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
+    refresh_cmd.add_argument("--week", type=int, help="focus the week-capable steps on one week")
+    refresh_cmd.set_defaults(func=_cmd_refresh)
 
     return parser
 
