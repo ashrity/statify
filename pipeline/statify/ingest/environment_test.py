@@ -209,21 +209,21 @@ def test_a_team_is_never_its_own_opponent():
 
 def test_opponent_pace_is_the_other_teams_own_pace():
     rows = {r["team_abbr"]: r for r in
-            environment_rows([GAME], {}, histories_for(), UPDATED_AT)}
+            environment_rows([GAME], {}, histories_for(), {}, UPDATED_AT)}
     assert rows["BAL"]["pace"] == 36.0
     assert rows["BAL"]["opponent_pace"] == rows["CIN"]["pace"] == 37.0
     assert rows["CIN"]["opponent_pace"] == 36.0
 
 
 def test_two_rows_per_game():
-    rows = environment_rows([GAME], {}, histories_for(), UPDATED_AT)
+    rows = environment_rows([GAME], {}, histories_for(), {}, UPDATED_AT)
     assert len(rows) == 2
     assert {r["team_abbr"] for r in rows} == {"BAL", "CIN"}
 
 
 def test_a_game_with_no_market_still_gets_its_pace_half():
     """Past weeks can never have a line; feature 23 still wants the pace."""
-    rows = environment_rows([GAME], {}, histories_for(), UPDATED_AT)
+    rows = environment_rows([GAME], {}, histories_for(), {}, UPDATED_AT)
     for row in rows:
         assert row["implied_team_total"] is None and row["books"] == 0
         assert row["pace"] is not None and row["pace_weeks"] == 6
@@ -232,7 +232,7 @@ def test_a_game_with_no_market_still_gets_its_pace_half():
 def test_a_missing_opponent_history_does_not_null_the_own_side():
     """The two halves fail independently."""
     rows = {r["team_abbr"]: r for r in environment_rows(
-        [GAME], {}, {"BAL": [tempo(w) for w in range(1, 7)]}, UPDATED_AT)}
+        [GAME], {}, {"BAL": [tempo(w) for w in range(1, 7)]}, {}, UPDATED_AT)}
     assert rows["BAL"]["pace"] is not None
     assert rows["BAL"]["opponent_pace"] is None
     assert rows["CIN"]["pace"] is None
@@ -243,11 +243,40 @@ def test_the_market_attaches_to_the_right_team():
     market = {("2026_07_CIN_BAL", "BAL"): [line(spread=-2.5, total=51.0)],
               ("2026_07_CIN_BAL", "CIN"): [line(spread=2.5, total=51.0)]}
     rows = {r["team_abbr"]: r for r in
-            environment_rows([GAME], market, histories_for(), UPDATED_AT)}
+            environment_rows([GAME], market, histories_for(), {}, UPDATED_AT)}
     assert rows["BAL"]["implied_team_total"] == 26.75
     assert rows["CIN"]["implied_team_total"] == 24.25
     assert rows["BAL"]["implied_team_total"] + rows["CIN"]["implied_team_total"] == 51.0
 
 
 def test_no_games_produce_no_rows():
-    assert environment_rows([], {}, {}, UPDATED_AT) == []
+    assert environment_rows([], {}, {}, {}, UPDATED_AT) == []
+
+
+# --- weather belongs to the game, not the team ------------------------------
+
+FORECAST = {"2026_07_CIN_BAL": {"wind_mph": 11.0, "temperature_f": 48.0,
+                                "precip_chance": 35}}
+
+
+def test_both_rows_of_a_game_carry_the_same_weather():
+    """It is a property of the game; two different values would be nonsense."""
+    rows = {r["team_abbr"]: r for r in
+            environment_rows([GAME], {}, histories_for(), FORECAST, UPDATED_AT)}
+    assert rows["BAL"]["wind_mph"] == rows["CIN"]["wind_mph"] == 11.0
+    assert rows["BAL"]["temperature_f"] == rows["CIN"]["temperature_f"] == 48.0
+    assert rows["BAL"]["precip_chance"] == rows["CIN"]["precip_chance"] == 35
+
+
+def test_a_game_with_no_forecast_carries_nulls():
+    """A dome, a past game, or one beyond the provider's horizon."""
+    rows = environment_rows([GAME], {}, histories_for(), {}, UPDATED_AT)
+    for row in rows:
+        assert row["wind_mph"] is None
+        assert row["temperature_f"] is None
+        assert row["precip_chance"] is None
+
+
+def test_a_missing_forecast_does_not_null_the_pace_half():
+    rows = environment_rows([GAME], {}, histories_for(), {}, UPDATED_AT)
+    assert all(r["pace"] is not None for r in rows)

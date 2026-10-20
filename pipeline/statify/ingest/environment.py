@@ -133,6 +133,7 @@ def environment_row(
     team_abbr: str,
     market: list[dict],
     histories: dict[str, list[dict]],
+    forecast: dict | None,
     updated_at: str,
 ) -> dict:
     """One team's environment for one game.
@@ -163,6 +164,13 @@ def environment_row(
         "proe_weeks": own["proe_weeks"],
         "opponent_pace": opponent["pace"],
         "opponent_proe": opponent["proe"],
+        # Weather belongs to the game, so both of its rows carry the same
+        # values. NULL for a dome, where weather does not apply, and for any
+        # game with no forecast: past games can never have one, and games
+        # beyond the provider's 16-day horizon do not have one yet.
+        "wind_mph": (forecast or {}).get("wind_mph"),
+        "temperature_f": (forecast or {}).get("temperature_f"),
+        "precip_chance": (forecast or {}).get("precip_chance"),
         "updated_at": updated_at,
     }
 
@@ -171,6 +179,7 @@ def environment_rows(
     games: list[dict],
     market: dict[tuple[str, str], list[dict]],
     histories: dict[str, list[dict]],
+    forecasts: dict[str, dict],
     updated_at: str,
 ) -> list[dict]:
     """Two rows per game, one per team.
@@ -186,7 +195,7 @@ def environment_rows(
                 environment_row(
                     game, team_abbr,
                     market.get((game["game_id"], team_abbr), []),
-                    histories, updated_at,
+                    histories, forecasts.get(game["game_id"]), updated_at,
                 )
             )
     return rows
@@ -197,13 +206,15 @@ INSERT INTO game_environment_weekly (
   game_id, team_abbr, season, week,
   spread, game_total, implied_team_total, books, market_captured_at,
   pace, pace_weeks, proe, proe_weeks,
-  opponent_pace, opponent_proe, updated_at
+  opponent_pace, opponent_proe,
+  wind_mph, temperature_f, precip_chance, updated_at
 )
 VALUES (
   :game_id, :team_abbr, :season, :week,
   :spread, :game_total, :implied_team_total, :books, :market_captured_at,
   :pace, :pace_weeks, :proe, :proe_weeks,
-  :opponent_pace, :opponent_proe, :updated_at
+  :opponent_pace, :opponent_proe,
+  :wind_mph, :temperature_f, :precip_chance, :updated_at
 )
 ON CONFLICT(game_id, team_abbr) DO UPDATE SET
   season = excluded.season,
@@ -219,6 +230,9 @@ ON CONFLICT(game_id, team_abbr) DO UPDATE SET
   proe_weeks = excluded.proe_weeks,
   opponent_pace = excluded.opponent_pace,
   opponent_proe = excluded.opponent_proe,
+  wind_mph = excluded.wind_mph,
+  temperature_f = excluded.temperature_f,
+  precip_chance = excluded.precip_chance,
   updated_at = excluded.updated_at
 """
 
@@ -235,6 +249,18 @@ FROM team_market_data WHERE season = ?
 TEMPO_QUERY = """
 SELECT team_abbr, week, plays, neutral_intervals, neutral_seconds_per_play, proe
 FROM team_tempo_weekly WHERE season = ?
+"""
+
+
+# The latest forecast per game. Earlier captures are history feature 27 will
+# want; the environment carries whichever was most recent.
+FORECAST_QUERY = """
+SELECT game_id, wind_mph, temperature_f, precip_chance
+FROM game_forecast
+WHERE (game_id, captured_at) IN (
+  SELECT game_id, MAX(captured_at) FROM game_forecast
+  WHERE season = ? GROUP BY game_id
+)
 """
 
 
@@ -257,7 +283,12 @@ def load_environment(conn: sqlite3.Connection, season: int) -> tuple[int, int, i
         entry = dict(row)
         histories[entry["team_abbr"]].append(tempo_history_row(entry))
 
-    rows = environment_rows(games, market, histories, utc_now())
+    forecasts = {
+        row[0]: {"wind_mph": row[1], "temperature_f": row[2], "precip_chance": row[3]}
+        for row in conn.execute(FORECAST_QUERY, (season,))
+    }
+
+    rows = environment_rows(games, market, histories, forecasts, utc_now())
     write(conn, ENVIRONMENT_UPSERT, rows)
     return (
         len(rows),

@@ -8,12 +8,14 @@ from collections.abc import Sequence
 from statify import migrate as migrations
 from statify.config import settings
 from statify.db import connection
+from statify.sources import open_meteo
 from statify.ingest.common import utc_now, write
 from statify.ingest import (
     defense,
     depth,
     efficiency,
     environment,
+    forecast,
     form,
     injuries,
     market,
@@ -138,6 +140,36 @@ def _cmd_ingest_injuries(args: argparse.Namespace) -> int:
     scope = f"week {args.week}" if args.week is not None else "full season"
     print(f"{upserted} injury rows upserted for {args.season} {scope}")
     print(f"{skipped} rows skipped (player not in the players table)")
+    return 0
+
+
+def _cmd_ingest_stadiums(_args: argparse.Namespace) -> int:
+    with connection() as conn:
+        stored, unresolved = forecast.load_stadiums(conn)
+
+    print(f"{stored} stadiums geocoded and stored")
+    # Named rather than counted: an unresolved stadium is a place name to fix,
+    # and the id alone does not say which.
+    for name in unresolved:
+        print(f"  UNRESOLVED: {name}")
+    return 0
+
+
+def _cmd_ingest_forecast(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        r = forecast.load_forecasts(conn, args.season, args.week, args.dry_run)
+
+    scope = f"week {args.week}" if args.week is not None else "every upcoming week"
+    print(f"{r['games']} outdoor games in range for {args.season} {scope}, "
+          f"across {r['stadiums']} stadiums")
+    print(f"{r['beyond_horizon']} beyond the {open_meteo.FORECAST_DAYS}-day forecast horizon, "
+          f"{r['already_played']} already played")
+    for name in r["unknown_stadium"]:
+        print(f"  UNKNOWN STADIUM: {name}")
+    if args.dry_run:
+        print("dry run, nothing fetched and nothing stored")
+        return 0
+    print(f"{r['stored']} forecasts stored, {r['unchanged']} unchanged since the last capture")
     return 0
 
 
@@ -496,6 +528,15 @@ def build_parser() -> argparse.ArgumentParser:
     injuries_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")
     injuries_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     injuries_cmd.set_defaults(func=_cmd_ingest_injuries)
+
+    forecast_cmd = datasets.add_parser("forecast", help="weather forecasts for upcoming games")
+    forecast_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
+    forecast_cmd.add_argument("--week", type=int, help="limit to one week")
+    forecast_cmd.add_argument("--dry-run", action="store_true", help="show the slate, fetch nothing")
+    forecast_cmd.set_defaults(func=_cmd_ingest_forecast)
+
+    stadiums_cmd = datasets.add_parser("stadiums", help="geocode stadium locations once")
+    stadiums_cmd.set_defaults(func=_cmd_ingest_stadiums)
 
     weather_cmd = datasets.add_parser("weather", help="load one season's per-game weather")
     weather_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2025")

@@ -46,7 +46,9 @@ Data pipeline, all run from `pipeline/`:
 - Depth charts: `uv run statify ingest depth --season <year> [--week <n>]`
 - Injury reports: `uv run statify ingest injuries --season <year> [--week <n>]`
 - Routes run: `uv run statify ingest routes --season <year> [--week <n>]` (2016 or later)
-- Weather (outdoor games): `uv run statify ingest weather --season <year>`
+- Weather, settled readings for played games: `uv run statify ingest weather --season <year>`
+- Stadium coordinates, once: `uv run statify ingest stadiums`
+- Weather forecasts for upcoming games: `uv run statify ingest forecast --season <year> [--week <n>] [--dry-run]`
 - Player prop lines: `uv run statify ingest props --season <year> --week <n> [--dry-run]`
 - Prop identity audit: `uv run statify props audit --season <year> --week <n> [--dry-run]`
 - Team spreads and totals: `uv run statify ingest market --season <year> [--week <n>] [--dry-run]`
@@ -191,6 +193,35 @@ pass-rusher counts at all; those rows keep their man and sack rates and carry
 NULL only in the blitz columns. `coverage_snaps` is also the sample size and
 runs from 14 to 63 across a team-week, so read it before trusting a single
 week's rate.
+
+**`weather` and `game_forecast` are different facts and must not be confused.**
+`ingest weather` records the settled game-time condition after a game is played;
+`ingest forecast` records what was expected beforehand. Migration 008 warns that
+projecting a game with its own game-time wind leaks the result of the game being
+projected, which is the failure features 11a, 13a and 14a carry direct tests
+against. `compute environment` reads the forecast, never the reading.
+
+`ingest forecast` uses Open-Meteo: free, no key, no account. Its window has two
+edges and the command reports both: a game **beyond 16 days** has no forecast
+yet, and a game **already played** never will, because the provider's series
+starts today and its archive returns actuals, which `weather` already holds. One
+request per stadium rather than per game, and novelty is decided by **content**,
+so a re-run stores nothing when the weather has not moved.
+
+Stadium coordinates come from `ingest stadiums`, which geocodes a maintained
+`STADIUM_PLACES` map once into the `stadiums` table. **Place names, never
+hand-typed coordinates**: nothing in nflverse publishes a latitude, Open-Meteo
+resolves places but not venues, and the failure modes differ. A wrong place name
+returns nothing or the wrong country and is visible; a wrong coordinate silently
+returns the weather somewhere else. Measured: taking the geocoder's top hit puts
+Levi's Stadium in Cuba and the Stade de France on Reunion, so the map carries a
+country and, for every US entry, a state. **An unknown stadium is named in the
+output, never skipped**, because the league adds venues most years; 40 are
+covered across 2024 to 2026 and `GER00` and `MUN01` are the same Munich ground.
+
+No weather coefficient lives anywhere in the pipeline. How much a 20mph wind
+should cost a passing projection is feature 18's modelling choice; these
+commands store conditions only.
 
 `compute environment` is the market and pace half of the matchup, one row per
 team per game. It needs `ingest market` and `compute tempo` to have run for the
