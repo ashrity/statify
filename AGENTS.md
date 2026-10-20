@@ -137,6 +137,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Combined raw stat projection: `uv run statify compute projection --season <year> [--week <n>]`
 - Store projections (history, append-only): `uv run statify compute generate-projections --season <year> [--week <n>]`
 - Match market lines and calculate the edge: `uv run statify compute edge --season <year> [--week <n>]`
+- Backtest projections against actual results: `uv run statify compute backtest --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -627,6 +628,46 @@ reproducing `edge = projected_value - market_line` exactly on every one,
 including `touchdowns`, where the arithmetic is probability minus the fixed
 0.5 line (one row: projected 0.0147, edge -0.4853) rather than a yardage
 difference.
+
+`compute backtest` writes `backtest_results`, keyed by `projection_id` (the
+surrogate key from `projections`, not a player/week/stat_type composite): a
+player/week/stat can have more than one generation, and every generation
+that reached a played week gets its own backtest row, never deduplicated to
+the latest one, since how a guess ages between generations is feature 29's
+question. It upserts rather than appends, unlike `projections` itself:
+`projection_id` already identifies one specific generation, so recomputing
+in place when `weekly_actuals` is corrected does not threaten any history.
+
+**`actual_value` for `touchdowns` is 0 or 1, not a count**, matching
+`anytime_td_prob`'s own probability scale so `error` stays a probability
+residual rather than mixing units. Every other stat type reads the matching
+`weekly_actuals` column directly.
+
+**`beat_line` is a three-way value, not forced into 0 or 1.** It is `1` when
+the projection's side (the sign of `edge`) matches the actual's side (the
+sign of `actual_value - market_line`), `0` when it does not, and `NULL` when
+there is no line to have taken a side of or either side landed exactly on
+the line, an honest push rather than a coin flip.
+
+**`beat_line` is `NULL` on every row this feature has produced so far**, for
+the same reason `compute edge` could only be measured on one week: no season
+in this project currently has both a played week and a matched market line
+for the same week. 2024 has no `prop_lines` at all; 2026 week 7, the only
+week with real market data, had not been played yet when this was built.
+Measured on 2024 (every stat type, full season), mean absolute error between
+`actual_value` and `projected_value`:
+
+| stat type | n | MAE |
+| --- | --- | --- |
+| receiving_yards | 6,545 | 13.190 |
+| receptions | 6,545 | 1.065 |
+| rushing_yards | 6,457 | 6.587 |
+| passing_yards | 3,993 | 10.347 |
+| touchdowns | 6,457 | 0.225 |
+
+A week not yet played gets no row at all, proven directly: 2026 week 7
+(unplayed as of this build) produced 0 backtest rows while weeks 1-6
+(already played) produced 7,805.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.

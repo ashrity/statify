@@ -11,6 +11,7 @@ from statify.db import connection
 from statify.sources import open_meteo
 from statify.ingest.common import utc_now, write, write_all
 from statify.ingest import (
+    backtest,
     defense,
     depth,
     edge,
@@ -491,6 +492,16 @@ def _cmd_compute_edge(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_backtest(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = backtest.load_backtest_results(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} backtest rows written for {args.season} {scope} (every projection whose game has been played)")
+    print("beat_line is NULL where there is no market_line, or on an exact push either side")
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -767,6 +778,11 @@ def build_parser() -> argparse.ArgumentParser:
     edge_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
     edge_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     edge_cmd.set_defaults(func=_cmd_compute_edge)
+
+    backtest_cmd = computations.add_parser("backtest", help="join each projection to what actually happened")
+    backtest_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    backtest_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    backtest_cmd.set_defaults(func=_cmd_compute_backtest)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
