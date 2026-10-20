@@ -60,6 +60,7 @@ def step_list(season: int, week: int | None = None) -> list[tuple[str, list[str]
         compute("projection"),
         compute("generate-projections"),
         compute("edge"),
+        compute("confidence"),
         compute("backtest"),
         compute("accuracy"),
     ]

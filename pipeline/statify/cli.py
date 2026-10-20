@@ -14,6 +14,7 @@ from statify.refresh import run_refresh
 from statify.ingest import (
     accuracy,
     backtest,
+    confidence,
     defense,
     depth,
     edge,
@@ -514,6 +515,16 @@ def _cmd_compute_accuracy(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_confidence(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = confidence.load_confidence(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} projections.confidence rows updated for {args.season} {scope}")
+    print("yardage/count stats: Phi(|edge| / own trailing stddev); touchdowns: distance from a coin flip on anytime_td_prob")
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -816,6 +827,11 @@ def build_parser() -> argparse.ArgumentParser:
     accuracy_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     accuracy_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     accuracy_cmd.set_defaults(func=_cmd_compute_accuracy)
+
+    confidence_cmd = computations.add_parser("confidence", help="convert edge and player volatility into projections.confidence")
+    confidence_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    confidence_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    confidence_cmd.set_defaults(func=_cmd_compute_confidence)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")

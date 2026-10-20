@@ -35,6 +35,7 @@ def test_every_ingest_and_compute_step_is_present():
         "compute projection",
         "compute generate-projections",
         "compute edge",
+        "compute confidence",
         "compute backtest",
         "compute accuracy",
     ]

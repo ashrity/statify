@@ -140,6 +140,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Backtest projections against actual results: `uv run statify compute backtest --season <year> [--week <n>]`
 - Aggregate MAE/RMSE per week: `uv run statify compute accuracy --season <year> [--week <n>]`
 - Weekly refresh, the whole pipeline in one command: `uv run statify refresh --season <year> [--week <n>]`
+- Variance and confidence (fills `projections.confidence`): `uv run statify compute confidence --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -734,6 +735,42 @@ testing the full orchestration against 2024 out of habit from every other
 feature's free historical test case. `--dry-run` on `ingest market` itself
 costs nothing and is the safer way to test `refresh`'s wiring without
 spending against a season that can never resolve.
+
+`compute confidence` is the last MVP feature. It fills `projections.confidence`,
+locked since feature 20 and `NULL` on every row until now, by converting each
+projection's `edge` and the player's own week-to-week volatility on that
+stat into a 0.5-to-1.0 reading: 0.5 is a coin flip, approaching 1.0 means
+the edge is large relative to how much that player's own number normally
+moves. It refuses to run before `compute edge` has, since there is nothing
+to be confident about without one.
+
+**Four stat types use the standard normal CDF; `touchdowns` reuses its own
+probability instead.** `confidence = Phi(|edge| / own_stddev)` for
+`receiving_yards`, `receptions`, `rushing_yards` and `passing_yards`, using
+only the standard library's `math.erf`, the same `math`-only discipline
+`compute touchdowns` used for its Poisson tail. `own_stddev` is a new table,
+`player_variance_weekly`, a player's sample standard deviation on that stat
+over his strictly-prior games this season, requiring at least 2 prior games
+(one game gives a trivial 0, which would read as perfect certainty rather
+than what one game actually tells you). `touchdowns` instead reuses feature
+17's `anytime_td_prob` directly: `max(anytime_td_prob, 1 - anytime_td_prob)`,
+how far that probability already sits from a coin flip, rather than fitting
+a second, worse-fitting normal model to a 0/1 outcome.
+
+**Driven by the projections that need scoring, not by weeks a player has
+played.** An early version computed variance by walking a player's own
+history of played weeks, which silently never reached the one week that
+matters: the unplayed week a real projection exists for. Fixed before
+shipping; `player_variance_weekly` rows are only ever built for a
+(player, week, stat_type) some projection actually needs scored.
+
+Measured on 2026 (the only season with any `edge`, the same data gap
+`compute edge` and `compute backtest` already found): 67 of 68 edged
+projections got a confidence value (the 68th had fewer than 2 prior games to
+measure a standard deviation from). A spot-checked `passing_yards` row
+reproduced exactly (edge 13.309, stddev 42.851, confidence 0.6219); a
+spot-checked `touchdowns` row reproduced exactly
+(`anytime_td_prob` 0.01466, confidence 0.98534).
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.
