@@ -130,6 +130,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Player efficiency: `uv run statify compute efficiency --season <year> [--week <n>]`
 - Trailing form: `uv run statify compute form --season <year>`
 - Expected team volume: `uv run statify compute volume --season <year> [--week <n>]`
+- Expected player opportunity: `uv run statify compute opportunity --season <year> [--week <n>]`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -340,6 +341,47 @@ Opponent adjustment was measured and rejected here: it made targets clearly
 worse (5.667 to 6.021). Market inputs were left out because
 `game_environment_weekly` exists for 2026 only, where six weeks of actuals is
 no basis for fitting a weight. Feature 18 owns both.
+
+`compute opportunity` belongs after `compute volume`, the only table it reads
+besides `weekly_actuals`, and has no dependency on `compute usage`, `compute
+form`, or `compute efficiency`. It refuses to run before `compute volume` has,
+naming that command, the same guard `compute efficiency` uses for `compute
+usage`.
+
+**It has no roster source, on purpose.** A player's row for week N exists only
+if he has at least one game this season before week N and his
+most-recent-as-of-week-N team has a game in week N. `depth_charts` would
+normally supply a roster, but it fails outright on 2026, the season this has
+to run against, so nothing here depends on it. The consequence is explicit: a
+rookie's or new signing's debut week gets no row, and an in-season trade shows
+up only from his first game under the new team onward, never proactively.
+
+**Targets, carries and attempts are a blend; routes is not.** Each of the
+first three is `weight * own_pg + (1 - weight) * (team_exp * share)`, own_pg
+being his trailing per-game average and share his trailing share of his
+team's same quantity. `exp_routes` is always `own_routes_pg`: feature 15a
+left team dropbacks unprojected, since the only source stops publishing after
+2025, and nothing here invents a substitute.
+
+**Unlike `team_volume_weekly`, the two sides mostly agree at the player
+level.** Measured on 2024 weeks 6 to 18, mean absolute error per player-week
+over the 4,761 rows where both sides were available:
+
+| weight | targets | carries | attempts |
+| --- | --- | --- | --- |
+| 0.0 | 1.3358 | 1.0858 | 0.8285 |
+| 0.3 | 1.3338 | 1.0837 | 0.8286 |
+| 0.5 | 1.3336 | 1.0831 | 0.8311 |
+| 1.0 | 1.3385 | 1.0840 | 0.8425 |
+
+Every curve is close to flat, because a team's own expectation is itself
+built from the same recent weeks a player's share is, so the two signals
+largely agree instead of pulling apart the way team-level pass and rush did.
+Argmins were 0.4, 0.5 and 0.1, each inside a flat band rather than a sharp
+minimum, so `TARGETS_OWN_WEIGHT` and `CARRIES_OWN_WEIGHT` ship at the round
+0.5 and `ATTEMPTS_OWN_WEIGHT` at the round 0.2, the "round number inside the
+flat region" judgement call `RUSH_OWN_WEIGHT` already made, rather than one
+season's argmin.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.

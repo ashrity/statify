@@ -21,6 +21,7 @@ from statify.ingest import (
     market,
     matchup,
     ngs,
+    opportunity,
     props,
     reference,
     routes,
@@ -392,6 +393,20 @@ def _cmd_compute_usage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_opportunity(args: argparse.Namespace) -> int:
+    with connection() as conn:
+        rows = opportunity.load_player_opportunity(conn, args.season, args.week)
+
+    scope = f"week {args.week}" if args.week is not None else "full season"
+    print(f"{rows} player/week opportunity rows for {args.season} {scope}")
+    print(
+        f"own weights: targets {opportunity.TARGETS_OWN_WEIGHT}, "
+        f"carries {opportunity.CARRIES_OWN_WEIGHT}, attempts {opportunity.ATTEMPTS_OWN_WEIGHT} "
+        "(the rest is his trailing share of the team's expectation); routes has no team share"
+    )
+    return 0
+
+
 def _cmd_compute_efficiency(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows, no_routes = efficiency.load_efficiency(conn, args.season, args.week)
@@ -621,6 +636,13 @@ def build_parser() -> argparse.ArgumentParser:
     usage_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     usage_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     usage_cmd.set_defaults(func=_cmd_compute_usage)
+
+    opportunity_cmd = computations.add_parser(
+        "opportunity", help="expected player targets, carries, attempts and routes"
+    )
+    opportunity_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    opportunity_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    opportunity_cmd.set_defaults(func=_cmd_compute_opportunity)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
