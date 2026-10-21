@@ -14,6 +14,7 @@ from statify.refresh import run_refresh
 from statify.ingest import (
     accuracy,
     backtest,
+    boosted,
     confidence,
     defense,
     depth,
@@ -536,6 +537,29 @@ def _cmd_compute_regression(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_boosted(args: argparse.Namespace) -> int:
+    train_weeks = set(range(2, 19))
+    test_weeks = set(range(19, 23))
+    with connection() as conn:
+        rows = boosted.load_boosted_results(conn, args.season, train_weeks, test_weeks)
+
+    print(f"{rows} stat types fit for {args.season} (train weeks 2-18, test weeks 19-22)")
+    with connection() as conn:
+        for row in conn.execute(
+            "SELECT stat_type, test_mae, v1_mae, ridge_mae FROM gradient_boost_results WHERE season = ?",
+            (args.season,),
+        ):
+            best = min(
+                (("v1", row["v1_mae"]), ("ridge", row["ridge_mae"]), ("xgboost", row["test_mae"])),
+                key=lambda pair: pair[1] if pair[1] is not None else float("inf"),
+            )
+            print(
+                f"  {row['stat_type']:<16} xgboost {row['test_mae']:.4f}  ridge {row['ridge_mae']}  "
+                f"v1 {row['v1_mae']}  best: {best[0]}"
+            )
+    return 0
+
+
 def _cmd_compute_confidence(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows = confidence.load_confidence(conn, args.season, args.week)
@@ -859,6 +883,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     regression_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     regression_cmd.set_defaults(func=_cmd_compute_regression)
+
+    boosted_cmd = computations.add_parser(
+        "boosted", help="fit a gradient-boosted model (XGBoost) with feature importance/SHAP output"
+    )
+    boosted_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    boosted_cmd.set_defaults(func=_cmd_compute_boosted)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")

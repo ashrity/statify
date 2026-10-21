@@ -8,7 +8,9 @@ dependencies = [
     "nflreadpy>=0.1.5",
     "python-dotenv>=1.0",
     "scikit-learn>=1.9.1",
+    "shap>=0.54.1",
     "tzdata>=2026.3",
+    "xgboost>=3.4.1",
 ]
 
 [project.scripts]

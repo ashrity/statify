@@ -142,6 +142,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Weekly refresh, the whole pipeline in one command: `uv run statify refresh --season <year> [--week <n>]`
 - Variance and confidence (fills `projections.confidence`): `uv run statify compute confidence --season <year> [--week <n>]`
 - Regression pipeline (Ridge/Lasso, learned matchup/environment weights): `uv run statify compute regression --season <year>`
+- Gradient-boosted model with feature importance/SHAP: `uv run statify compute boosted --season <year>`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -843,6 +844,41 @@ fixed at exactly 0 rather than estimated from noisy data the way Ridge must.
 This is a measured-and-rejected result in the same honest tradition as
 feature 15a's opponent adjustment and feature 18's own pass-matchup finding,
 not a failure to hide: the live pipeline still runs on `v1`, unchanged.
+
+`compute boosted` is the last build-plan item: a gradient-boosted tree
+(`XGBRegressor`) per stat type, the same historical data and the same
+held-out temporal split (2024 weeks 2-18 train, 19-22 test) feature 31 used,
+but fed the three **raw** features directly rather than feature 31's
+hand-built interaction terms, since a tree model finds interactions on its
+own. `xgboost` and `shap` are this feature's new dependencies.
+
+**A third, independent confirmation of the same finding**, this time by
+feature importance and SHAP value rather than a fitted coefficient. Measured
+test MAE, three ways, on the same held-out weeks:
+
+| stat type | XGBoost | Ridge (31) | v1 | importance: baseline / matchup / env |
+| --- | --- | --- | --- | --- |
+| receiving_yards | 14.0819 | 14.1401 | 13.8927 | 1.00 / 0.00 / 0.00 |
+| receptions | 1.0288 | 1.0305 | 1.0111 | 1.00 / 0.00 / 0.00 |
+| rushing_yards | 6.7383 | 6.8646 | 6.7262 | 0.94 / 0.06 / 0.00 |
+| passing_yards | 9.4451 | 8.2163 | 6.5993 | 1.00 / 0.00 / 0.00 |
+
+**`v1` won on held-out error for every stat type, against both learned
+model families.** XGBoost edged out Ridge on three of four (not
+`passing_yards`, where both learned models did markedly worse than `v1`,
+plausibly the smallest sample of the four). `environment_multiplier`
+carries exactly zero importance for every stat type; `matchup_multiplier`
+only matters for `rushing_yards`, and only slightly, the same shape the
+grid sweep and the Ridge coefficients both already found. Three different
+methods (a 1-D grid sweep, joint linear regression, and now a nonlinear
+tree ensemble with SHAP) converged on the same qualitative answer: hand-set
+`v1` already uses the real signal here, and there was not more to find.
+
+One real bug caught before trusting the stored numbers: SHAP values come
+back as numpy scalars, and `sqlite3` silently stores a numpy float as raw
+bytes rather than a `REAL` unless it is cast to a native Python `float`
+first. The gain-based `feature_importances_` happened to already go through
+`.tolist()`, which masked the same risk there.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.
