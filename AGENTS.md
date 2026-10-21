@@ -352,6 +352,45 @@ worse (5.667 to 6.021). Market inputs were left out because
 `game_environment_weekly` exists for 2026 only, where six weeks of actuals is
 no basis for fitting a weight. Feature 18 owns both.
 
+**Feature 30 fills the one gap this table's week 1 left open: cross-season
+shrinkage.** `exp_targets`/`exp_carries`/`exp_attempts` now blend a team's
+in-season own rate with its full rate from the most recent **prior season on
+file**, the weight `games_played / (games_played + k)` shifting from pure
+prior-season at week 1 toward pure in-season as the year goes on.
+`own_targets_pg`/`own_carries_pg`/`own_attempts_pg` keep their original,
+pure in-season meaning unchanged; the blend sits between that and
+`exp_targets`, never inside it. This needed `ingest weekly --season 2025`
+run for the first time: `games` already had 2025's schedule, but
+`weekly_actuals` did not, and "prior season" means nothing against data
+never pulled.
+
+**2024 is provably unchanged**, because this project has nothing before it:
+`prior_season` is `NULL` on every 2024 row, and `blend()`'s existing
+fallback (own a side is `None`, return the other) means `exp_targets`'s
+formula there is identical to what it was before this feature existed.
+**2026 week 1, previously entirely `NULL`, is now filled** from 2025 at
+`cross_season_weight = 0.0` (pure prior season): 32 of 32 teams got a real
+`exp_targets` for the first time.
+
+Measured on 2026 weeks 1 to 5 (the only weeks with both a prior season and
+games left to shrink), mean absolute error against actual team volume, 126
+team-weeks:
+
+| k | targets | carries | attempts |
+| --- | --- | --- | --- |
+| 8 | 5.8798 | 5.3017 | 6.1316 |
+| 12 (argmin) | 5.8786 | 5.2954 | 6.1313 |
+| 20 | 5.8790 | 5.2959 | 6.1304 |
+| no shrinkage | 6.2589 | 5.9399 | 6.4524 |
+
+Shrinkage beat no shrinkage for every quantity, by a wide margin for targets
+and carries. `targets` and `carries` show a real, if shallow, interior
+minimum near k=12; `attempts` is nearly flat across the whole range tried.
+One shared `CROSS_SEASON_K = 10.0` ships for all three rather than three
+separately fit constants: a single season is not enough evidence to trust
+three noisy per-quantity optima, and all three cluster near this value
+regardless.
+
 `compute opportunity` belongs after `compute volume`, the only table it reads
 besides `weekly_actuals`, and has no dependency on `compute usage`, `compute
 form`, or `compute efficiency`. It refuses to run before `compute volume` has,

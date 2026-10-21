@@ -2,8 +2,10 @@ from statify.ingest.volume import (
     PASS_OWN_WEIGHT,
     RUSH_OWN_WEIGHT,
     blend,
+    cross_season_weight,
     league_rates,
     own_rates,
+    prior_season_rates,
     scheduled,
     team_week_totals,
     volume_row,
@@ -148,3 +150,52 @@ def test_rows_cover_both_sides_of_every_game():
     schedule = [game(1, "BUF", "MIA"), game(1, "NYJ", "NE")]
     rows = volume_rows([], schedule, 2024, updated_at=UPDATED_AT)
     assert sorted(row["team_abbr"] for row in rows) == ["BUF", "MIA", "NE", "NYJ"]
+
+
+# --- feature 30: cross-season shrinkage -----------------------------------------
+
+
+def test_no_prior_season_leaves_exp_targets_exactly_as_before():
+    """A season with nothing earlier on file (2024) must be provably unchanged."""
+    history = [played("BUF", 1, targets=40), played("BUF", 2, targets=40)]
+    row = volume_row("BUF", 2024, 3, history, team_week_totals(history), UPDATED_AT)
+    expected = blend(row["own_targets_pg"], row["league_targets_pg"], PASS_OWN_WEIGHT)
+    assert row["exp_targets"] == expected
+    assert row["prior_season"] is None
+    assert row["cross_season_weight"] is None
+    assert row["prior_season_targets_pg"] is None
+
+
+def test_week_one_with_a_prior_season_is_no_longer_null():
+    """The exact gap feature 30 exists to fill."""
+    prior_totals = [played("BUF", w, targets=20) for w in range(1, 18)]
+    row = volume_row("BUF", 2026, 1, [], team_week_totals([]), UPDATED_AT, prior_season=2025, prior_season_totals=prior_totals)
+    assert row["games_played"] == 0
+    assert row["prior_season"] == 2025
+    assert row["prior_season_targets_pg"] == 20.0
+    assert row["cross_season_weight"] == 0.0  # pure prior season at zero games played
+    assert row["exp_targets"] is not None
+
+
+def test_cross_season_weight_rises_toward_one_as_games_played_grows():
+    assert cross_season_weight(0, k=3.0) == 0.0
+    low = cross_season_weight(1, k=3.0)
+    high = cross_season_weight(10, k=3.0)
+    assert 0.0 < low < high < 1.0
+
+
+def test_prior_season_rates_is_none_for_a_team_absent_from_that_season():
+    totals = [played("MIA", 1, targets=30)]
+    rates = prior_season_rates(totals, "BUF")
+    assert rates["targets"] is None
+
+
+def test_own_targets_pg_is_unaffected_by_shrinkage():
+    """own_targets_pg keeps its pure in-season meaning; only exp_targets shrinks."""
+    history = [played("BUF", 1, targets=40)]
+    prior_totals = [played("BUF", w, targets=10) for w in range(1, 18)]
+    row = volume_row(
+        "BUF", 2026, 2, history, team_week_totals(history), UPDATED_AT,
+        prior_season=2025, prior_season_totals=prior_totals,
+    )
+    assert row["own_targets_pg"] == 40.0  # unchanged: one prior game this season, pure in-season
