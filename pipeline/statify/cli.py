@@ -33,6 +33,7 @@ from statify.ingest import (
     projections,
     props,
     reference,
+    regression,
     routes,
     snaps,
     tempo,
@@ -515,6 +516,26 @@ def _cmd_compute_accuracy(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_regression(args: argparse.Namespace) -> int:
+    train_weeks = set(range(2, 19))
+    test_weeks = set(range(19, 23))
+    with connection() as conn:
+        rows = regression.load_regression_coefficients(conn, args.season, train_weeks, test_weeks)
+
+    print(f"{rows} stat types fit for {args.season} (train weeks 2-18, test weeks 19-22)")
+    with connection() as conn:
+        for coef_row in conn.execute(
+            "SELECT stat_type, model, test_mae, baseline_mae FROM regression_coefficients WHERE season = ?",
+            (args.season,),
+        ):
+            beat = "beat v1" if coef_row["baseline_mae"] is not None and coef_row["test_mae"] < coef_row["baseline_mae"] else "did not beat v1"
+            print(
+                f"  {coef_row['stat_type']:<16} {coef_row['model']:<6} test MAE {coef_row['test_mae']:.4f} "
+                f"vs v1 {coef_row['baseline_mae']}: {beat}"
+            )
+    return 0
+
+
 def _cmd_compute_confidence(args: argparse.Namespace) -> int:
     with connection() as conn:
         rows = confidence.load_confidence(conn, args.season, args.week)
@@ -832,6 +853,12 @@ def build_parser() -> argparse.ArgumentParser:
     confidence_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
     confidence_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
     confidence_cmd.set_defaults(func=_cmd_compute_confidence)
+
+    regression_cmd = computations.add_parser(
+        "regression", help="fit Ridge/Lasso weights for the matchup/environment multipliers from history"
+    )
+    regression_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")
+    regression_cmd.set_defaults(func=_cmd_compute_regression)
 
     efficiency_cmd = computations.add_parser("efficiency", help="player output per opportunity")
     efficiency_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2024")

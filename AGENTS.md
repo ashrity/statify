@@ -141,6 +141,7 @@ Computed metrics, derived from data already stored rather than fetched:
 - Aggregate MAE/RMSE per week: `uv run statify compute accuracy --season <year> [--week <n>]`
 - Weekly refresh, the whole pipeline in one command: `uv run statify refresh --season <year> [--week <n>]`
 - Variance and confidence (fills `projections.confidence`): `uv run statify compute confidence --season <year> [--week <n>]`
+- Regression pipeline (Ridge/Lasso, learned matchup/environment weights): `uv run statify compute regression --season <year>`
 
 `compute form` writes both the trailing windows (last 3, last 5, season to date)
 and their exponentially weighted counterparts in one pass, so the two halves of
@@ -810,6 +811,38 @@ measure a standard deviation from). A spot-checked `passing_yards` row
 reproduced exactly (edge 13.309, stddev 42.851, confidence 0.6219); a
 spot-checked `touchdowns` row reproduced exactly
 (`anytime_td_prob` 0.01466, confidence 0.98534).
+
+`compute regression` is the first feature to fit several weights jointly
+rather than one at a time by grid sweep: Ridge and Lasso, per stat type (not
+`touchdowns`, whose Poisson structure is not a linear regression target),
+predicting `actual_value` from `baseline_value` and its interaction with
+`(matchup_multiplier_used - 1)` and `(environment_multiplier_used - 1)`,
+trained on 2024's regular season (weeks 2-18) and evaluated on the playoffs
+(weeks 19-22), a genuinely held-out temporal split the training data never
+sees. `scikit-learn` is this feature's one new dependency.
+
+**The learned model did not beat `v1`'s hand-set weights, and it mostly
+re-derived the same answer feature 18's one-weight-at-a-time grid sweep
+already found.** Ridge won over Lasso for all four stat types. Measured test
+MAE against `v1`'s on the same held-out weeks:
+
+| stat type | Ridge test MAE | v1 MAE | matchup_coef | environment_coef |
+| --- | --- | --- | --- | --- |
+| receiving_yards | 14.1401 | 13.8927 | 0.0 | 0.0 |
+| receptions | 1.0305 | 1.0111 | 0.0 | 0.0 |
+| rushing_yards | 6.8646 | 6.7262 | 0.1094 | 0.0 |
+| passing_yards | 8.2163 | 6.5993 | 0.0 | 0.0 |
+
+Three of four stat types learned a matchup coefficient of exactly 0.0,
+independently confirming `PASS_MATCHUP_K = 0.0` and `ENVIRONMENT_M = 0.0`
+from feature 18's own grid sweep; `rushing_yards` learned a small nonzero
+coefficient, echoing that feature's one real, nonzero finding
+(`RUSH_MATCHUP_K = 0.5`) by a completely different method. `v1` still won on
+held-out error everywhere, plausibly because it has those near-zero weights
+fixed at exactly 0 rather than estimated from noisy data the way Ridge must.
+This is a measured-and-rejected result in the same honest tradition as
+feature 15a's opponent adjustment and feature 18's own pass-matchup finding,
+not a failure to hide: the live pipeline still runs on `v1`, unchanged.
 
 `compute` reads play-by-play and the tables the ingest commands filled, so run
 the relevant `ingest` commands for a season first.
