@@ -1,44 +1,31 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { BOARD_GRID, BoardRow } from "@/components/board/BoardRow";
+import { SiteHeader } from "@/components/SiteHeader";
+import { STAT_LABELS } from "@/lib/format";
 import {
+  getBoardGames,
   getLatestBoardWeek,
   getWeeklyBoard,
   POSITIONS,
   STAT_TYPES,
-  type BoardRow,
-  type StatType,
+  type BoardGame,
+  type BoardRow as Row,
 } from "@/lib/projections";
 
-const STAT_LABELS: Record<StatType, string> = {
-  receiving_yards: "Rec Yards",
-  receptions: "Receptions",
-  rushing_yards: "Rush Yards",
-  passing_yards: "Pass Yards",
-  touchdowns: "Anytime TD",
-};
-
-function formatValue(statType: StatType, value: number): string {
-  if (statType === "touchdowns") {
-    return `${(value * 100).toFixed(1)}%`;
-  }
-  if (statType === "receptions") {
-    return value.toFixed(1);
-  }
-  return value.toFixed(1);
+/**
+ * Kickoff day in US Eastern, the timezone an NFL slate is actually discussed
+ * in, rather than whatever the server happens to be set to.
+ */
+function kickoffDay(kickoffAt: string): string {
+  return new Date(kickoffAt).toLocaleDateString("en-US", {
+    weekday: "short",
+    timeZone: "America/New_York",
+  });
 }
 
-function formatEdge(statType: StatType, edge: number): string {
-  const sign = edge > 0 ? "+" : "";
-  if (statType === "touchdowns") {
-    return `${sign}${(edge * 100).toFixed(1)} pts`;
-  }
-  return `${sign}${edge.toFixed(1)}`;
-}
-
-function edgeColorClass(edge: number): string {
-  if (edge > 0) return "text-positive";
-  if (edge < 0) return "text-negative";
-  return "text-muted";
+function gameLabel(game: BoardGame): string {
+  return `${game.awayTeam} @ ${game.homeTeam}`;
 }
 
 function buildHref(
@@ -66,10 +53,10 @@ function FilterLink({
   return (
     <Link
       href={href}
-      className={`rounded px-2 py-1 text-sm ${
+      className={`rounded-full border px-3 py-1 text-sm transition-colors ${
         active
-          ? "bg-foreground text-background"
-          : "bg-surface text-muted hover:text-foreground"
+          ? "border-foreground bg-foreground text-background"
+          : "border-border text-muted hover:border-muted hover:text-foreground"
       }`}
     >
       {children}
@@ -90,105 +77,133 @@ export default async function Home({
   const requestedWeek = asString(params.week);
   const position = asString(params.position);
   const statType = asString(params.statType);
+  const game = asString(params.game);
 
   const latest = getLatestBoardWeek();
   const season = requestedSeason ? Number(requestedSeason) : latest?.season;
   const week = requestedWeek ? Number(requestedWeek) : latest?.week;
 
-  const rows: BoardRow[] =
-    season && week ? getWeeklyBoard({ season, week, position, statType }) : [];
+  const rows: Row[] =
+    season && week ? getWeeklyBoard({ season, week, position, statType, game }) : [];
+  const games: BoardGame[] = season && week ? getBoardGames(season, week) : [];
 
   const current = {
     season: requestedSeason,
     week: requestedWeek,
     position,
     statType,
+    game,
   };
 
+  const overs = rows.filter((row) => row.edge > 0).length;
+
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8">
-      <h1 className="text-xl font-semibold">Statify</h1>
-      {season && week ? (
-        <p className="mt-1 text-sm text-muted">
-          Season {season}, week {week} &middot; sorted by edge size
-        </p>
-      ) : (
-        <p className="mt-1 text-sm text-muted">
-          No projections with a matched market line yet.
-        </p>
-      )}
+    <>
+      <SiteHeader active="/" />
+      <main className="mx-auto max-w-6xl px-4 py-6">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Weekly board</h1>
+            {season && week ? (
+              <p className="mt-1 text-sm text-muted">
+                Season {season}, week {week}. Sorted by edge, overs first and unders last.
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-muted">
+                No projections with a matched market line yet.
+              </p>
+            )}
+          </div>
+          {rows.length > 0 && (
+            <p className="text-sm text-muted">
+              <span className="text-foreground">{rows.length}</span> lines &middot;{" "}
+              <span className="text-positive">{overs} over</span> &middot;{" "}
+              <span className="text-negative">{rows.length - overs} under</span>
+            </p>
+          )}
+        </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <FilterLink href={buildHref(current, { position: undefined })} active={!position}>
-          All positions
-        </FilterLink>
-        {POSITIONS.map((pos) => (
-          <FilterLink
-            key={pos}
-            href={buildHref(current, { position: pos })}
-            active={position === pos}
-          >
-            {pos}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <FilterLink href={buildHref(current, { position: undefined })} active={!position}>
+            All positions
           </FilterLink>
-        ))}
-      </div>
-
-      <div className="mt-2 flex flex-wrap gap-2">
-        <FilterLink href={buildHref(current, { statType: undefined })} active={!statType}>
-          All stats
-        </FilterLink>
-        {STAT_TYPES.map((stat) => (
-          <FilterLink
-            key={stat}
-            href={buildHref(current, { statType: stat })}
-            active={statType === stat}
-          >
-            {STAT_LABELS[stat]}
-          </FilterLink>
-        ))}
-      </div>
-
-      <table className="mt-6 w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-muted">
-            <th className="py-2 pr-3">Player</th>
-            <th className="py-2 pr-3">Pos</th>
-            <th className="py-2 pr-3">Team</th>
-            <th className="py-2 pr-3">Stat</th>
-            <th className="py-2 pr-3">Book</th>
-            <th className="py-2 pr-3 text-right">Line</th>
-            <th className="py-2 pr-3 text-right">Projection</th>
-            <th className="py-2 pr-3 text-right">Edge</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr
-              key={`${row.playerId}-${row.statType}`}
-              className="border-b border-border"
+          {POSITIONS.map((pos) => (
+            <FilterLink
+              key={pos}
+              href={buildHref(current, { position: pos })}
+              active={position === pos}
             >
-              <td className="py-2 pr-3">{row.name}</td>
-              <td className="py-2 pr-3 text-muted">{row.position}</td>
-              <td className="py-2 pr-3 text-muted">{row.teamAbbr}</td>
-              <td className="py-2 pr-3 text-muted">{STAT_LABELS[row.statType]}</td>
-              <td className="py-2 pr-3 text-muted">{row.book ?? "-"}</td>
-              <td className="py-2 pr-3 text-right">
-                {formatValue(row.statType, row.marketLine)}
-              </td>
-              <td className="py-2 pr-3 text-right">
-                {formatValue(row.statType, row.projectedValue)}
-              </td>
-              <td className={`py-2 pr-3 text-right font-medium ${edgeColorClass(row.edge)}`}>
-                {formatEdge(row.statType, row.edge)}
-              </td>
-            </tr>
+              {pos}
+            </FilterLink>
           ))}
-        </tbody>
-      </table>
+        </div>
 
-      {rows.length === 0 && season && week && (
-        <p className="mt-6 text-sm text-muted">No rows match the current filters.</p>
-      )}
-    </main>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <FilterLink href={buildHref(current, { statType: undefined })} active={!statType}>
+            All stats
+          </FilterLink>
+          {STAT_TYPES.map((stat) => (
+            <FilterLink
+              key={stat}
+              href={buildHref(current, { statType: stat })}
+              active={statType === stat}
+            >
+              {STAT_LABELS[stat]}
+            </FilterLink>
+          ))}
+        </div>
+
+        {games.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <FilterLink href={buildHref(current, { game: undefined })} active={!game}>
+              All games
+            </FilterLink>
+            {games.map((g) => (
+              <FilterLink
+                key={g.gameId}
+                href={buildHref(current, { game: g.gameId })}
+                active={game === g.gameId}
+              >
+                {gameLabel(g)}
+                <span className="ml-1.5 text-xs opacity-60">{kickoffDay(g.kickoffAt)}</span>
+              </FilterLink>
+            ))}
+          </div>
+        )}
+
+        {/* An edge is only comparable within one stat type, so a mixed board is
+            ranked but not like for like. Worth saying once, above the table. */}
+        {!statType && rows.length > 0 && (
+          <p className="mt-4 text-xs text-muted">
+            Showing every stat type together. Yards and receptions are not on the same
+            scale, so filter to one stat for a like-for-like ranking.
+          </p>
+        )}
+
+        <div className="mt-4 overflow-hidden rounded-lg border border-border">
+          <div
+            className={`${BOARD_GRID} border-b border-border bg-surface px-2 py-2 text-xs uppercase tracking-wide text-muted`}
+          >
+            <span>Player</span>
+            <span>Stat</span>
+            <span className="text-right">Line</span>
+            <span className="text-right">Projection</span>
+            <span className="text-right">Edge</span>
+            <span className="text-right">Conf</span>
+            <span className="text-right">Book</span>
+          </div>
+          {rows.map((row) => (
+            <BoardRow key={`${row.playerId}-${row.statType}`} row={row} />
+          ))}
+          {rows.length === 0 && (
+            <p className="px-3 py-6 text-sm text-muted">
+              {season && week
+                ? "No rows match the current filters."
+                : "Run the pipeline to generate projections."}
+            </p>
+          )}
+        </div>
+      </main>
+    </>
   );
 }

@@ -119,6 +119,18 @@ Feeds disagree on team abbreviations (Next Gen Stats says `LAR` where the rest s
 `LA`). Inbound rows go through `normalize_team()` in `statify/ingest/common.py`;
 add aliases there, not per-loader.
 
+`ingest teams` and `ingest players` also carry the dashboard's branding, added in
+migration 038: `teams.logo_url`, `teams.color_primary`, `teams.color_secondary`
+from `load_teams()`, and `players.headshot_url` from `load_rosters()`. **Pulled
+from the feed, never hand-typed**, the same rule `ingest stadiums` follows for
+coordinates: a wrong hex code or a stale CDN path is invisible until someone
+looks at the page. The headshot update is guard-free on `roster_season`, like
+`pfr_id` already is, because a photo is player identity rather than roster
+state; its `WHERE` clause only avoids rewriting a row that already holds that
+exact URL, so a re-run reports no spurious changes. Coverage is uneven and that
+is expected: 928 of 1,463 players have a headshot, against 32 of 32 teams for
+logo and colours, but all 68 rows the board actually renders have both.
+
 Computed metrics, derived from data already stored rather than fetched:
 
 - Team defense by position and play type: `uv run statify compute defense --season <year> [--week <n>]`
@@ -649,20 +661,81 @@ row's identity, never change here, and a row already matched
 never retroactively changes what an earlier projection was scored against.
 
 **The match is temporal, not just by key.** For a given (player, season,
-week, stat_type), the match is the `prop_lines` row with the latest
+week, stat_type), the preferred match is the `prop_lines` row with the latest
 `captured_at` at or before the projection's own `generated_at`, so a
-projection generated Tuesday is never scored against a line not captured
-until Thursday. This is the same strictly-prior instinct every earlier
+projection generated Tuesday is not scored against a Thursday line when a
+Tuesday one exists. This is the same strictly-prior instinct every earlier
 feature applies to weeks, extended to a second clock: the order two
 independent processes actually ran in. Ties at the same instant break on
 `prop_lines.id`, since there is no preferred-book concept anywhere in this
 project yet.
+
+**That rule alone deadlocked against feature 20's content-based novelty, so
+there is a documented fallback.** Books post player props game by game as
+kickoff nears, so a capture normally lands *after* the week's projections were
+generated. Feature 20 then stores no new projection row, because no
+`projected_value` changed, and the new lines have no row recent enough to see
+them. Measured on 2026 week 7: a capture of 3,701 line rows matched **0**
+projections, and `generate-projections` correctly stored 0 new rows. A
+projection with no capture at or before it therefore falls back to the
+**earliest** capture after it. Earliest, not latest, for two reasons: it is the
+least future information that still produces a match, and it is stable, where
+"the latest" would keep moving as further captures arrived and make the answer
+depend on when the command happened to run.
+
+The guarantee this protects is unchanged, because an already-matched row
+(`market_line IS NOT NULL`) is still never revisited: a later capture cannot
+retroactively change what an earlier projection was scored against. Whether a
+row took the fallback needs **no new column**; it is
+`prop_lines.captured_at > projections.generated_at` through `prop_line_id`, and
+the command reports the count so a run leaning on it is not silent. Features 27
+and 28 should treat those rows as not strictly prior. Re-measured on 2026 week
+7 after a full-slate capture: 697 rows matched, 629 of them by fallback, 372
+players across 14 of 14 games, up from 68 rows and 23 players across 2 games.
+
+A `NULL` line is skipped as a candidate rather than blocking the match, since
+a NULL carries no number to beat. Previously a NULL at the latest prior capture
+discarded the projection entirely.
 
 **No consensus across books.** `team_market_data` and
 `game_environment_weekly` compute a median across books for team-level
 lines; nothing here does that for player props, matching the locked
 `projections` schema's single `prop_line_id`. One capture, temporally
 correct, is the whole scope; a consensus version is a retune candidate.
+
+**`touchdowns` is measured against the book's price, not the 0.5 line.** The
+posted 0.5 is not the market's opinion; it only encodes "at least one". Scoring
+a probability against it measured every player against a coin flip and
+flattered exactly the players books already price as likely. So `market_line`
+for `touchdowns` stores the probability implied by `prop_lines.over_odds`
+(`-odds / (-odds + 100)` for a favourite, `100 / (odds + 100)` for an
+underdog), and `edge = projected_value - market_line` stays literally true in
+probability units. The 0.5 is still recoverable through `prop_line_id`. A
+touchdowns row with no `over_odds` is not matched at all, rather than falling
+back to 0.5.
+
+Measured on 2026 week 7: Jahmyr Gibbs went from the board's **best** touchdown
+edge at +29.8 points against 0.5 to **+3.6** against the -320 the book quoted,
+and Christian McCaffrey flipped from +9.6 to **-11.9**. All 372 rows reproduce
+the arithmetic exactly, and the other four stat types still match
+`prop_lines.line` to the last digit. One row legitimately keeps a 0.500 market
+line: Quinshon Judkins at +100.
+
+**The book's margin is left in.** A two-way market could be de-vigged against
+its own other side, but anytime touchdown has none, since books post no `No`
+price and `under_odds` is NULL throughout. Rather than invent a vig constant,
+the figure stays as quoted, which biases every touchdown edge slightly
+negative. Same discipline as the pipeline holding no weather coefficient.
+De-vigging is a retune candidate.
+
+**This change surfaced, rather than caused, a hole in feature 17.** The new
+top touchdown edges are thin-sample artifacts: Teagan Quitoriano projects at
+52.8% against the book's 4.3% because he caught 2 targets in week 5 and both
+were touchdowns, a 1.0 TD-per-target rate that `RECEIVING_TD_RATE_OWN_WEIGHT`
+of 0.8 barely shrinks. Jawhar Jordan has exactly 1 prior game. `compute
+touchdowns` has no minimum-opportunity floor, which is the real cost of that
+own-weight shipping so high. A floor is a retune candidate; the board's own
+per-row panel flags the sample in the meantime.
 
 **2024 has no `prop_lines` rows at all** (historical odds are a paid tier),
 and 2026 week 1 has lines but no matching projections (week 1 is entirely
@@ -785,18 +858,29 @@ the edge is large relative to how much that player's own number normally
 moves. It refuses to run before `compute edge` has, since there is nothing
 to be confident about without one.
 
-**Four stat types use the standard normal CDF; `touchdowns` reuses its own
-probability instead.** `confidence = Phi(|edge| / own_stddev)` for
-`receiving_yards`, `receptions`, `rushing_yards` and `passing_yards`, using
-only the standard library's `math.erf`, the same `math`-only discipline
-`compute touchdowns` used for its Poisson tail. `own_stddev` is a new table,
+**Every stat type uses the standard normal CDF; only the denominator
+differs.** `confidence = Phi(|edge| / own_stddev)` for `receiving_yards`,
+`receptions`, `rushing_yards` and `passing_yards`, using only the standard
+library's `math.erf`, the same `math`-only discipline `compute touchdowns`
+used for its Poisson tail. `own_stddev` is a new table,
 `player_variance_weekly`, a player's sample standard deviation on that stat
 over his strictly-prior games this season, requiring at least 2 prior games
 (one game gives a trivial 0, which would read as perfect certainty rather
-than what one game actually tells you). `touchdowns` instead reuses feature
-17's `anytime_td_prob` directly: `max(anytime_td_prob, 1 - anytime_td_prob)`,
-how far that probability already sits from a coin flip, rather than fitting
-a second, worse-fitting normal model to a 0/1 outcome.
+than what one game actually tells you). `touchdowns` divides instead by
+`sqrt(p * (1 - p))`, the standard deviation of the 0/1 outcome itself, which
+is the Bernoulli analogue of a player's week-to-week stddev and needs no
+stored column, since a touchdown's volatility is a function of its
+probability.
+
+**That replaced `max(p, 1 - p)`, which came loose when the touchdown edge
+changed.** Distance from a coin flip was the right answer only while
+`edge = p - 0.5`, which made the two the same quantity up to a constant
+(`0.5 + |edge|`). Once `compute edge` started measuring against the book's
+implied probability, a coin flip stopped being the thing beaten, and the old
+formula read **0.80** on a Jahmyr Gibbs row whose edge was **+0.036**: it was
+reporting how likely he was to score, which the book knew too, rather than how
+much the model disagreed with the price. He now reads **0.536**. Confidence
+still carries no sample-size term, which is a separate retune candidate.
 
 **Driven by the projections that need scoring, not by weeks a player has
 played.** An early version computed variance by walking a player's own
@@ -805,13 +889,20 @@ matters: the unplayed week a real projection exists for. Fixed before
 shipping; `player_variance_weekly` rows are only ever built for a
 (player, week, stat_type) some projection actually needs scored.
 
-Measured on 2026 (the only season with any `edge`, the same data gap
-`compute edge` and `compute backtest` already found): 67 of 68 edged
-projections got a confidence value (the 68th had fewer than 2 prior games to
-measure a standard deviation from). A spot-checked `passing_yards` row
-reproduced exactly (edge 13.309, stddev 42.851, confidence 0.6219); a
-spot-checked `touchdowns` row reproduced exactly
-(`anytime_td_prob` 0.01466, confidence 0.98534).
+Measured on 2026 week 7 after a full-slate props capture: 645 of 697 edged
+projections got a confidence value, the rest having fewer than 2 prior games
+to measure a standard deviation from. A spot-checked `passing_yards` row
+reproduced exactly (edge 13.309, stddev 42.851, confidence 0.6219), as did
+every one of the 372 `touchdowns` rows against an independent recomputation
+of `Phi(|edge| / sqrt(p * (1 - p)))`.
+
+**Scratch-copy probes must not copy `data/statify.db` with `cp`.** The
+database runs in WAL mode, so recent commits live in `statify.db-wal` and a
+copy of the main file alone is a stale snapshot. This bit during this work: a
+`cp` copy reported migration 037, no `teams.logo_url` and 1,460 players
+against the live 1,463, and the probe silently tested a day-old database. Use
+`VACUUM INTO`, which writes one consistent file including WAL content, and
+point a command at it with `STATIFY_DB_PATH`.
 
 `compute regression` is the first feature to fit several weights jointly
 rather than one at a time by grid sweep: Ridge and Lasso, per stat type (not
@@ -931,11 +1022,76 @@ evidence for a change.
 - No em dashes in generated content (docs, comments, commit messages).
 
 Routes (confirmed at feature 22, `project-overview.md`'s UI/UX section):
-`/` is the weekly projections board, the only one built so far.
-`/player/[id]` and `/accuracy` are named placeholders for features 23/24/29,
-not yet built. Pages read `lib/db.ts`'s connection directly in async server
-components (`await searchParams`, which is a Promise in this Next.js
-version); there is no API route layer for this data and none is planned.
+`/` is the weekly projections board and `/accuracy` is the model's track record
+over time (feature 29). `/player[id]` is still a named placeholder, not built.
+Pages read `lib/db.ts`'s connection directly in async server components
+(`await searchParams`, which is a Promise in this Next.js version); there is no
+API route layer for this data and none is planned.
+
+**The board filters by position, stat type and game**, each composing with the
+others through query params (`?position=RB&statType=rushing_yards&game=...`).
+The game list comes from `getBoardGames`, which returns only the week's games
+that actually have board rows, in kickoff order, labelled `AWAY @ HOME` with
+the kickoff weekday in **US Eastern** rather than the server's timezone, since
+that is the timezone an NFL slate is discussed in.
+
+**A player's game is resolved through `player_matchup_environment_weekly
+.team_abbr`, not `players.team_abbr`.** The latter is the player's *current*
+team, and 2 of 2026 week 7's 697 rows disagree with it; the schema notes warn
+that a trade must not rewrite history. Verified as an exact partition: the 14
+per-game counts sum to 697, the unfiltered total, and each filtered view
+contains only that game's two teams.
+
+**The board is sorted by signed edge, not by `ABS(edge)`.** The biggest
+positive edges (the model says over) are at the top, the biggest negative ones
+(the model says under) at the bottom. An edge is only comparable within one
+stat type, so the stat-type filter is what makes the ranking like for like: on
+an unfiltered board a `touchdowns` edge is a probability on a 0-to-1 scale
+(displayed as percentage points) and interleaves with yardage edges in a way
+that looks jumbled but is correctly ordered. The page says so above the table.
+
+**Every row expands into the arithmetic behind its edge**, built by
+`lib/explain.ts` from the stored intermediate columns rather than recomputed:
+opportunity times efficiency gives the baseline, times matchup and environment
+gives the projection, minus the line gives the edge. `touchdowns` takes the
+other branch, since it is a Poisson tail against a fixed 0.5 line with no
+multipliers.
+
+**Three different things read as `1.000` and the panel must not conflate
+them**, which a first version of it did:
+
+1. A coefficient fixed at exactly 0 because it was measured and rejected
+   (`PASS_MATCHUP_K`, `ENVIRONMENT_M`).
+2. A genuinely league-average opponent, where the coefficient is live.
+3. No upstream data at all, substituted as neutral by `compute projection`.
+
+Telling 3 apart from the others needs `player_matchup_environment_weekly`'s own
+`pass_matchup_multiplier`/`rush_matchup_multiplier`, because
+`matchup_multiplier_used` has already had the substitution applied. **On the
+live board it is always case 3**: `compute matchup` emits rows only for weeks a
+defense has played, so `team_matchup_weekly` for 2026 stops at week 6 and every
+matchup multiplier from week 7 on is `NULL`. That includes `rushing_yards`,
+where `RUSH_MATCHUP_K` is a live 0.5, so the one matchup adjustment this project
+measured as real never actually reaches a forward-looking projection. Structural
+gap, not yet repaired, analogous to `team_volume_weekly`'s week 1 but biting
+every future week rather than only the first.
+
+**The panel also shows the sample count and flags a thin one**, because the
+confidence model makes small samples look better rather than worse: two similar
+games give a tiny standard deviation, so `Phi(|edge| / stddev)` saturates toward
+1.0. Measured on the 2026 week 7 board, A.J. Brown's `receiving_yards` row has
+confidence **1.00** off a weekly swing of 0.7 from **2** prior games. 52 of 697
+rows rest on 2 or fewer. A sample-size term in `compute confidence` is a retune
+candidate; until then the row says so.
+
+The disclosure is a native `<details>`/`<summary>`, so the pages stay server
+components with no `'use client'` anywhere in the app. The columns are a CSS
+grid (`BOARD_GRID`, shared by the header and every row) rather than a
+`<table>`, because a `<details>` cannot legally wrap a `<tr>`.
+
+**ESLint ignores `pipeline/.venv/**`.** `shap` (feature 32) vendors a bundled
+JavaScript plot widget into its site-packages, and without the ignore
+`npm run lint` walks it and emits thousands of warnings from third-party code.
 
 ## Working style
 

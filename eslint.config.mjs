@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The Python side is not this linter's business. It matters because
+    // `shap` (feature 32) vendors a bundled JavaScript plot widget into its
+    // site-packages, which ESLint would otherwise walk.
+    "pipeline/.venv/**",
   ]),
 ]);
 

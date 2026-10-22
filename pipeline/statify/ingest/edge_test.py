@@ -1,4 +1,14 @@
-from statify.ingest.edge import edge_updates, latest_at_or_before, prop_lines_by_key
+import pytest
+
+from statify.ingest.edge import (
+    american_to_probability,
+    earliest_after,
+    edge_updates,
+    latest_at_or_before,
+    market_value,
+    matched_pairs,
+    prop_lines_by_key,
+)
 
 
 def projection(player, week, stat_type, projected_value, generated_at, pid=1):
@@ -12,8 +22,16 @@ def projection(player, week, stat_type, projected_value, generated_at, pid=1):
     }
 
 
-def prop_line(player, week, stat_type, line, captured_at, lid):
-    return {"id": lid, "player_id": player, "week": week, "stat_type": stat_type, "line": line, "captured_at": captured_at}
+def prop_line(player, week, stat_type, line, captured_at, lid, over_odds=None):
+    return {
+        "id": lid,
+        "player_id": player,
+        "week": week,
+        "stat_type": stat_type,
+        "line": line,
+        "over_odds": over_odds,
+        "captured_at": captured_at,
+    }
 
 
 # --- the temporal match -----------------------------------------------------
@@ -71,11 +89,81 @@ def test_a_matched_projection_gets_an_edge_update():
     assert updates[0] == {"id": 1, "market_line": 60.5, "prop_line_id": 10, "edge": 65.0 - 60.5}
 
 
-def test_touchdowns_edge_is_probability_minus_the_fixed_line():
-    proj = projection("WR1", 3, "touchdowns", 0.42, "2026-01-02T00:00:00+00:00")
-    lines = [prop_line("WR1", 3, "touchdowns", 0.5, "2026-01-01T00:00:00+00:00", 11)]
+# --- touchdowns are measured against the book's price, not the 0.5 line -------
+
+
+@pytest.mark.parametrize(
+    "odds,expected",
+    [
+        (-200, 2 / 3),
+        (-320, 320 / 420),
+        (-110, 110 / 210),
+        (100, 0.5),
+        (150, 0.4),
+        (2200, 100 / 2300),
+    ],
+)
+def test_american_odds_convert_to_implied_probability(odds, expected):
+    assert american_to_probability(odds) == pytest.approx(expected)
+
+
+def test_a_favourite_is_more_likely_than_an_underdog():
+    assert american_to_probability(-320) > american_to_probability(320)
+
+
+def test_market_value_for_a_yardage_stat_is_the_posted_line():
+    line = prop_line("WR1", 3, "receiving_yards", 60.5, "2026-01-01T00:00:00+00:00", 1)
+    assert market_value(line, "receiving_yards") == 60.5
+
+
+def test_market_value_for_touchdowns_ignores_the_half_line():
+    """The 0.5 only encodes "at least one"; the opinion is in the price."""
+    line = prop_line("RB1", 3, "touchdowns", 0.5, "2026-01-01T00:00:00+00:00", 1, over_odds=-320)
+    assert market_value(line, "touchdowns") == pytest.approx(320 / 420)
+
+
+def test_touchdowns_with_no_price_has_no_market_value():
+    line = prop_line("RB1", 3, "touchdowns", 0.5, "2026-01-01T00:00:00+00:00", 1, over_odds=None)
+    assert market_value(line, "touchdowns") is None
+
+
+def test_touchdowns_edge_is_our_probability_minus_the_book_s():
+    proj = projection("RB1", 3, "touchdowns", 0.798, "2026-01-02T00:00:00+00:00")
+    lines = [prop_line("RB1", 3, "touchdowns", 0.5, "2026-01-01T00:00:00+00:00", 11, over_odds=-320)]
     updates = edge_updates([proj], lines)
-    assert updates[0]["edge"] == 0.42 - 0.5
+    assert updates[0]["market_line"] == pytest.approx(320 / 420)
+    assert updates[0]["edge"] == pytest.approx(0.798 - 320 / 420)
+
+
+def test_a_heavy_favourite_the_model_also_likes_gets_a_small_edge_not_a_huge_one():
+    """The whole point: a player the book already prices as likely is not an edge.
+
+    Against the old fixed 0.5 line this projection would have scored +0.298.
+    """
+    proj = projection("RB1", 3, "touchdowns", 0.798, "2026-01-02T00:00:00+00:00")
+    lines = [prop_line("RB1", 3, "touchdowns", 0.5, "2026-01-01T00:00:00+00:00", 11, over_odds=-320)]
+    assert edge_updates([proj], lines)[0]["edge"] < 0.05
+
+
+def test_the_model_can_disagree_downward_with_a_favourite():
+    proj = projection("RB1", 3, "touchdowns", 0.596, "2026-01-02T00:00:00+00:00")
+    lines = [prop_line("RB1", 3, "touchdowns", 0.5, "2026-01-01T00:00:00+00:00", 11, over_odds=-250)]
+    assert edge_updates([proj], lines)[0]["edge"] < 0
+
+
+def test_a_touchdowns_row_with_no_price_is_not_matched_at_all():
+    proj = projection("RB1", 3, "touchdowns", 0.42, "2026-01-02T00:00:00+00:00")
+    lines = [prop_line("RB1", 3, "touchdowns", 0.5, "2026-01-01T00:00:00+00:00", 11)]
+    assert edge_updates([proj], lines) == []
+
+
+def test_a_priced_capture_is_preferred_over_an_unpriced_earlier_one():
+    proj = projection("RB1", 3, "touchdowns", 0.42, "2026-01-03T00:00:00+00:00")
+    lines = [
+        prop_line("RB1", 3, "touchdowns", 0.5, "2026-01-01T00:00:00+00:00", 10),
+        prop_line("RB1", 3, "touchdowns", 0.5, "2026-01-02T00:00:00+00:00", 11, over_odds=120),
+    ]
+    assert edge_updates([proj], lines)[0]["prop_line_id"] == 11
 
 
 def test_no_matching_line_leaves_the_projection_untouched():
@@ -97,6 +185,74 @@ def test_a_null_line_is_not_a_match():
     proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-02T00:00:00+00:00")
     lines = [prop_line("WR1", 3, "receiving_yards", None, "2026-01-01T00:00:00+00:00", 1)]
     assert edge_updates([proj], lines) == []
+
+
+# --- the later-capture fallback -----------------------------------------------
+
+
+def test_earliest_after_picks_the_first_capture_past_generation():
+    candidates = sorted(
+        [
+            prop_line("WR1", 3, "receiving_yards", 55.5, "2026-01-01T00:00:00+00:00", 1),
+            prop_line("WR1", 3, "receiving_yards", 58.5, "2026-01-04T00:00:00+00:00", 2),
+            prop_line("WR1", 3, "receiving_yards", 70.5, "2026-01-05T00:00:00+00:00", 3),
+        ],
+        key=lambda r: (r["captured_at"], r["id"]),
+    )
+    match = earliest_after(candidates, "2026-01-03T00:00:00+00:00")
+    assert match["line"] == 58.5
+
+
+def test_earliest_after_ignores_a_capture_at_the_same_instant():
+    candidates = [prop_line("WR1", 3, "receiving_yards", 60.5, "2026-01-01T00:00:00+00:00", 1)]
+    assert earliest_after(candidates, "2026-01-01T00:00:00+00:00") is None
+
+
+def test_a_projection_with_no_prior_capture_falls_back_to_a_later_one():
+    proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-01T00:00:00+00:00")
+    lines = [prop_line("WR1", 3, "receiving_yards", 60.5, "2026-01-02T00:00:00+00:00", 10)]
+    updates = edge_updates([proj], lines)
+    assert updates == [{"id": 1, "market_line": 60.5, "prop_line_id": 10, "edge": 65.0 - 60.5}]
+
+
+def test_the_fallback_is_the_earliest_later_capture_not_the_latest():
+    """Stability: the answer must not depend on when the command happened to run."""
+    proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-01T00:00:00+00:00")
+    lines = [
+        prop_line("WR1", 3, "receiving_yards", 70.5, "2026-01-05T00:00:00+00:00", 11),
+        prop_line("WR1", 3, "receiving_yards", 60.5, "2026-01-02T00:00:00+00:00", 10),
+    ]
+    assert edge_updates([proj], lines)[0]["prop_line_id"] == 10
+
+
+def test_a_prior_capture_still_wins_over_a_later_one():
+    proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-03T00:00:00+00:00")
+    lines = [
+        prop_line("WR1", 3, "receiving_yards", 55.5, "2026-01-01T00:00:00+00:00", 10),
+        prop_line("WR1", 3, "receiving_yards", 70.5, "2026-01-05T00:00:00+00:00", 11),
+    ]
+    assert edge_updates([proj], lines)[0]["prop_line_id"] == 10
+
+
+def test_matched_pairs_flags_only_the_rows_that_took_the_fallback():
+    prior = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-03T00:00:00+00:00", pid=1)
+    later = projection("WR2", 3, "receiving_yards", 65.0, "2026-01-01T00:00:00+00:00", pid=2)
+    lines = [
+        prop_line("WR1", 3, "receiving_yards", 55.5, "2026-01-01T00:00:00+00:00", 10),
+        prop_line("WR2", 3, "receiving_yards", 60.5, "2026-01-02T00:00:00+00:00", 11),
+    ]
+    flags = {p["id"]: was_later for p, _, was_later in matched_pairs([prior, later], lines)}
+    assert flags == {1: False, 2: True}
+
+
+def test_a_null_line_is_skipped_rather_than_blocking_an_earlier_one():
+    """A NULL line carries no number to beat, so it is not a candidate at all."""
+    proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-03T00:00:00+00:00")
+    lines = [
+        prop_line("WR1", 3, "receiving_yards", 55.5, "2026-01-01T00:00:00+00:00", 10),
+        prop_line("WR1", 3, "receiving_yards", None, "2026-01-02T00:00:00+00:00", 11),
+    ]
+    assert edge_updates([proj], lines)[0]["prop_line_id"] == 10
 
 
 def test_prop_lines_by_key_sorts_each_group_by_captured_at_then_id():

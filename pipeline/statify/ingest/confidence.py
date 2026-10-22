@@ -2,11 +2,13 @@
 into a 0.5-to-1.0 confidence reading, filling projections.confidence, locked
 since feature 20 and NULL on every row until now.
 
-Four stat types use the standard normal CDF of how many standard deviations
+Every stat type uses the standard normal CDF of how many standard deviations
 the edge represents (math.erf only, no new dependency, the same math-only
-discipline feature 17 used for its Poisson tail). touchdowns reuses feature
-17's own anytime_td_prob directly rather than fitting a second, worse model
-to a 0/1 outcome.
+discipline feature 17 used for its Poisson tail). The four yardage and count
+stats divide by the player's own trailing week-to-week stddev; touchdowns
+divides by sqrt(p * (1 - p)), the spread of the 0/1 outcome itself, since a
+touchdown's volatility is a function of its probability and needs no stored
+column. See touchdown_confidence for why this replaced max(p, 1 - p).
 
 Driven by the projections that need scoring, not by weeks a player has
 already played: the week that matters most is the one not yet played, and a
@@ -87,11 +89,28 @@ def yardage_confidence(edge: float | None, own_stddev: float | None) -> float | 
     return normal_cdf(abs(edge) / own_stddev)
 
 
-def touchdown_confidence(anytime_td_prob: float | None) -> float | None:
-    """How far feature 17's own probability sits from a coin flip, either way."""
-    if anytime_td_prob is None:
+def touchdown_confidence(edge: float | None, anytime_td_prob: float | None) -> float | None:
+    """Phi(|edge| / sqrt(p * (1 - p))), the same shape as yardage_confidence.
+
+    This used to be max(p, 1 - p), how far the projected probability sat from a
+    coin flip. That was the right answer only while the edge was p - 0.5, which
+    made the two the same thing up to a constant: 0.5 + |edge|. Once the edge
+    became p minus the probability the book's price implies, a coin flip stopped
+    being the thing being beaten, and the old formula came loose from the edge
+    entirely. It read 0.80 on a Jahmyr Gibbs row whose edge was +0.036, because
+    he is very likely to score and the book knew that too.
+
+    The denominator is sqrt(p * (1 - p)), the standard deviation of the 0/1
+    outcome itself, which is the Bernoulli analogue of the player's own
+    week-to-week stddev the yardage stats divide by. No new constant and no new
+    stored column: a touchdown's volatility is a function of its probability.
+    """
+    if edge is None or anytime_td_prob is None:
         return None
-    return max(anytime_td_prob, 1 - anytime_td_prob)
+    spread = math.sqrt(anytime_td_prob * (1 - anytime_td_prob))
+    if spread == 0:
+        return None
+    return normal_cdf(abs(edge) / spread)
 
 
 def variance_row(player_id: str, season: int, week: int, stat_type: str, history: list[dict], updated_at: str) -> dict:
@@ -127,7 +146,7 @@ def confidence_rows(
     for row in projection_rows:
         if row["stat_type"] == "touchdowns":
             prob = touchdown_index.get((row["player_id"], row["week"]))
-            confidence = touchdown_confidence(prob)
+            confidence = touchdown_confidence(row["edge"], prob)
         else:
             key = (row["player_id"], row["week"], row["stat_type"])
             if key not in variance_by_key:

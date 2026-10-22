@@ -489,11 +489,16 @@ def _cmd_compute_generate_projections(args: argparse.Namespace) -> int:
 
 def _cmd_compute_edge(args: argparse.Namespace) -> int:
     with connection() as conn:
-        rows = edge.load_edges(conn, args.season, args.week)
+        rows, later = edge.load_edges(conn, args.season, args.week)
 
     scope = f"week {args.week}" if args.week is not None else "full season"
     print(f"{rows} projection rows matched to a market line and scored for {args.season} {scope}")
     print("match is temporal: the latest prop_lines capture at or before each projection's own generated_at")
+    if later:
+        print(
+            f"  {later} of those had no capture at or before generation and fell back to the"
+            " earliest capture after it"
+        )
     return 0
 
 
@@ -566,7 +571,7 @@ def _cmd_compute_confidence(args: argparse.Namespace) -> int:
 
     scope = f"week {args.week}" if args.week is not None else "full season"
     print(f"{rows} projections.confidence rows updated for {args.season} {scope}")
-    print("yardage/count stats: Phi(|edge| / own trailing stddev); touchdowns: distance from a coin flip on anytime_td_prob")
+    print("yardage/count stats: Phi(|edge| / own trailing stddev); touchdowns: Phi(|edge| / sqrt(p * (1 - p)))")
     return 0
 
 

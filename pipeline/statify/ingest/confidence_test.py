@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from statify.ingest.confidence import (
     confidence_rows,
     normal_cdf,
@@ -73,14 +75,44 @@ def test_confidence_is_none_without_an_edge_or_a_stddev():
 # --- touchdown confidence --------------------------------------------------------
 
 
-def test_touchdown_confidence_reads_distance_from_a_coin_flip_either_side():
-    assert touchdown_confidence(0.1) == 0.9
-    assert touchdown_confidence(0.9) == 0.9
-    assert touchdown_confidence(0.5) == 0.5
+def test_touchdown_confidence_is_a_coin_flip_at_a_zero_edge():
+    assert touchdown_confidence(0.0, 0.4) == pytest.approx(0.5)
+
+
+def test_touchdown_confidence_grows_with_the_edge():
+    small = touchdown_confidence(0.02, 0.5)
+    large = touchdown_confidence(0.30, 0.5)
+    assert 0.5 < small < large < 1.0
+
+
+def test_touchdown_confidence_ignores_the_direction_of_the_edge():
+    assert touchdown_confidence(-0.2, 0.5) == pytest.approx(touchdown_confidence(0.2, 0.5))
+
+
+def test_a_likely_scorer_the_book_also_likes_is_not_confident():
+    """The regression this replaced: Gibbs read 0.80 on a +0.036 edge.
+
+    max(p, 1 - p) measured how likely he was to score, not how much the model
+    disagreed with the price.
+    """
+    assert touchdown_confidence(0.036, 0.798) < 0.6
+
+
+def test_a_wide_disagreement_is_confident_even_near_a_coin_flip_probability():
+    assert touchdown_confidence(0.484, 0.528) > 0.8
 
 
 def test_touchdown_confidence_is_none_without_a_probability():
-    assert touchdown_confidence(None) is None
+    assert touchdown_confidence(0.1, None) is None
+
+
+def test_touchdown_confidence_is_none_without_an_edge():
+    assert touchdown_confidence(None, 0.4) is None
+
+
+def test_a_certain_outcome_has_no_spread_to_divide_by():
+    assert touchdown_confidence(0.1, 1.0) is None
+    assert touchdown_confidence(0.1, 0.0) is None
 
 
 # --- variance_row is driven by the projection's week, not play history ---------
@@ -116,10 +148,11 @@ def test_confidence_rows_computes_variance_only_once_per_key():
 
 
 def test_touchdowns_never_gets_a_variance_row():
+    """A touchdown's spread comes from its own probability, not a stored stddev."""
     rows = [projection(1, "WR1", 4, "touchdowns", edge=-0.2)]
     variance, updates = confidence_rows(rows, {}, {("WR1", 4): 0.3}, updated_at=UPDATED_AT)
     assert variance == []
-    assert updates == [{"id": 1, "confidence": 0.7}]
+    assert updates == [{"id": 1, "confidence": touchdown_confidence(-0.2, 0.3)}]
 
 
 def test_a_row_with_no_resolvable_confidence_produces_no_update():

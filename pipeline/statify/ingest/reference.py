@@ -32,10 +32,13 @@ DOME_ROOFS = frozenset({"dome", "closed"})
 SKILL_POSITIONS = frozenset({"QB", "RB", "WR", "TE"})
 
 TEAMS_UPSERT = """
-INSERT INTO teams (team_abbr, name, updated_at)
-VALUES (:team_abbr, :name, :updated_at)
+INSERT INTO teams (team_abbr, name, logo_url, color_primary, color_secondary, updated_at)
+VALUES (:team_abbr, :name, :logo_url, :color_primary, :color_secondary, :updated_at)
 ON CONFLICT(team_abbr) DO UPDATE SET
   name = excluded.name,
+  logo_url = excluded.logo_url,
+  color_primary = excluded.color_primary,
+  color_secondary = excluded.color_secondary,
   updated_at = excluded.updated_at
 """
 
@@ -47,7 +50,8 @@ def load_teams(conn: sqlite3.Connection) -> tuple[int, int]:
 
     rows: list[dict] = []
     skipped = 0
-    for source in frame.select(["team_abbr", "team_name"]).iter_rows(named=True):
+    columns = ["team_abbr", "team_name", "team_logo_espn", "team_color", "team_color2"]
+    for source in frame.select(columns).iter_rows(named=True):
         if source["team_abbr"] in HISTORICAL_TEAM_ABBRS:
             skipped += 1
             continue
@@ -55,6 +59,9 @@ def load_teams(conn: sqlite3.Connection) -> tuple[int, int]:
             {
                 "team_abbr": source["team_abbr"],
                 "name": source["team_name"],
+                "logo_url": source["team_logo_espn"],
+                "color_primary": source["team_color"],
+                "color_secondary": source["team_color2"],
                 "updated_at": updated_at,
             }
         )
@@ -145,6 +152,16 @@ WHERE excluded.roster_season >= COALESCE(players.roster_season, 0)
 """
 
 
+# Guard-free for the same reason PLAYER_PFR_ID_UPDATE is: a headshot is identity
+# rather than roster state. The WHERE clause only avoids rewriting a row that
+# already holds this exact URL, so a re-run reports no spurious changes.
+PLAYER_HEADSHOT_UPDATE = """
+UPDATE players SET headshot_url = :headshot_url, updated_at = :updated_at
+WHERE player_id = :player_id
+  AND (headshot_url IS NULL OR headshot_url <> :headshot_url)
+"""
+
+
 def load_players(conn: sqlite3.Connection, season: int) -> tuple[int, int, int]:
     """Upsert one season's skill-position players.
 
@@ -157,8 +174,10 @@ def load_players(conn: sqlite3.Connection, season: int) -> tuple[int, int, int]:
     updated_at = _utc_now()
 
     rows: list[dict] = []
+    headshots: list[dict] = []
     skipped = 0
-    for source in frame.select(["gsis_id", "full_name", "position", "team"]).iter_rows(named=True):
+    columns = ["gsis_id", "full_name", "position", "team", "headshot_url"]
+    for source in frame.select(columns).iter_rows(named=True):
         if source["position"] not in SKILL_POSITIONS:
             continue
 
@@ -178,10 +197,23 @@ def load_players(conn: sqlite3.Connection, season: int) -> tuple[int, int, int]:
                 "updated_at": updated_at,
             }
         )
+        if source["headshot_url"]:
+            headshots.append(
+                {
+                    "player_id": source["gsis_id"],
+                    "headshot_url": source["headshot_url"],
+                    "updated_at": updated_at,
+                }
+            )
 
     before = conn.total_changes
     _write(conn, PLAYERS_UPSERT, rows)
     written = conn.total_changes - before
+
+    # Outside the roster_season guard on purpose, for the same reason pfr_id is:
+    # a photo is identity, not roster state, so the guard would leave it NULL on
+    # every player already stamped with a newer season.
+    _write(conn, PLAYER_HEADSHOT_UPDATE, headshots)
     return written, skipped, len(rows) - written
 
 

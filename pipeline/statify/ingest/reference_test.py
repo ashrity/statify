@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from statify import migrate as migrations
-from statify.ingest.reference import PLAYERS_UPSERT
+from statify.ingest.reference import PLAYER_HEADSHOT_UPDATE, PLAYERS_UPSERT
 
 
 @pytest.fixture
@@ -100,3 +100,52 @@ def test_guard_skips_are_not_counted_as_writes(conn):
     before = conn.total_changes
     upsert(conn, "00-0034844", "DAL", 2026)
     assert conn.total_changes - before == 1
+
+
+# --- headshots: identity, not roster state -----------------------------------
+
+
+def set_headshot(conn, player_id, url):
+    conn.execute(
+        PLAYER_HEADSHOT_UPDATE,
+        {"player_id": player_id, "headshot_url": url, "updated_at": "2026-01-01T00:00:00+00:00"},
+    )
+
+
+def headshot_of(conn, player_id):
+    row = conn.execute(
+        "SELECT headshot_url FROM players WHERE player_id = ?", (player_id,)
+    ).fetchone()
+    return None if row is None else row["headshot_url"]
+
+
+def test_an_older_pull_still_sets_a_headshot(conn):
+    """The reason this sits outside the roster_season guard, like pfr_id: a photo
+    is identity, so a 2024 pull must still fill a player stamped 2026."""
+    upsert(conn, "00-0034844", "PHI", 2026)
+    set_headshot(conn, "00-0034844", "https://example.test/a.png")
+    assert headshot_of(conn, "00-0034844") == "https://example.test/a.png"
+
+
+def test_a_changed_headshot_is_rewritten(conn):
+    """Guard-free means a new photo replaces an old one."""
+    upsert(conn, "00-0034844", "PHI", 2026)
+    set_headshot(conn, "00-0034844", "https://example.test/old.png")
+    set_headshot(conn, "00-0034844", "https://example.test/new.png")
+    assert headshot_of(conn, "00-0034844") == "https://example.test/new.png"
+
+
+def test_an_unchanged_headshot_is_not_a_write(conn):
+    """A re-run must not report every player as changed."""
+    upsert(conn, "00-0034844", "PHI", 2026)
+    set_headshot(conn, "00-0034844", "https://example.test/a.png")
+
+    before = conn.total_changes
+    set_headshot(conn, "00-0034844", "https://example.test/a.png")
+    assert conn.total_changes - before == 0
+
+
+def test_a_headshot_for_an_unknown_player_writes_nothing(conn):
+    """The UPDATE touches existing rows only; it never invents a player."""
+    set_headshot(conn, "00-0000000", "https://example.test/a.png")
+    assert headshot_of(conn, "00-0000000") is None
