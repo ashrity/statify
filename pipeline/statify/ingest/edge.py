@@ -40,6 +40,9 @@ the market saying "at least one"; see market_value.
 from __future__ import annotations
 
 import sqlite3
+from typing import NamedTuple
+
+from statify.ingest.common import utc_now
 
 PROJECTIONS_QUERY = """
 SELECT id, player_id, week, stat_type, projected_value, generated_at
@@ -56,6 +59,38 @@ WHERE season = :season
 EDGE_UPDATE = """
 UPDATE projections
 SET market_line = :market_line, prop_line_id = :prop_line_id, edge = :edge
+WHERE id = :id
+"""
+
+# Repricing deliberately discards what a projection was scored against, which
+# every other path in this command refuses to do. It is therefore scoped to
+# games that have not kicked off: a line for a game already played is history,
+# and rewriting it would also desynchronise backtest_results.beat_line, which
+# is derived from market_line. A projection whose game cannot be resolved is
+# left alone rather than guessed at.
+REPRICE_SCOPE_QUERY = """
+SELECT p.id
+FROM projections p
+JOIN player_matchup_environment_weekly me
+  ON me.player_id = p.player_id AND me.season = p.season AND me.week = p.week
+JOIN games g
+  ON g.season = p.season AND g.week = p.week
+ AND (g.home_team = me.team_abbr OR g.away_team = me.team_abbr)
+WHERE p.season = :season AND p.market_line IS NOT NULL AND g.kickoff_at > :now
+"""
+
+# Must honour the same --week filter reprice_ids does, or left_alone subtracts
+# a week-scoped clear from a season-wide total.
+MATCHED_COUNT_QUERY = """
+SELECT COUNT(*) FROM projections WHERE season = :season AND market_line IS NOT NULL
+"""
+
+# confidence is cleared with the edge it was derived from rather than left
+# describing a line this row no longer points at. The command names
+# compute confidence in its output so the gap is not silent.
+REPRICE_CLEAR = """
+UPDATE projections
+SET market_line = NULL, prop_line_id = NULL, edge = NULL, confidence = NULL
 WHERE id = :id
 """
 
@@ -176,9 +211,34 @@ def edge_updates(projections: list[dict], prop_lines: list[dict]) -> list[dict]:
     return [edge_update(p, line) for p, line, _ in matched_pairs(projections, prop_lines)]
 
 
+class EdgeResult(NamedTuple):
+    matched: int
+    later: int
+    """Matched against a capture after the projection was generated."""
+    cleared: int
+    """Repriced: a previous match discarded so a newer line could be taken."""
+    left_alone: int
+    """Already matched and not repriced, because the game has kicked off."""
+
+
+def reprice_ids(
+    conn: sqlite3.Connection, season: int, now: str, week: int | None = None
+) -> list[int]:
+    """Already-matched projections whose game has not kicked off yet."""
+    query = REPRICE_SCOPE_QUERY
+    params: dict = {"season": season, "now": now}
+    if week is not None:
+        query += " AND p.week = :week"
+        params["week"] = week
+    return [row[0] for row in conn.execute(query, params).fetchall()]
+
+
 def load_edges(
-    conn: sqlite3.Connection, season: int, week: int | None = None
-) -> tuple[int, int]:
+    conn: sqlite3.Connection,
+    season: int,
+    week: int | None = None,
+    reprice: bool = False,
+) -> EdgeResult:
     projections_count = conn.execute(
         "SELECT COUNT(*) FROM projections WHERE season = ?", (season,)
     ).fetchone()[0]
@@ -186,6 +246,27 @@ def load_edges(
         raise RuntimeError(
             f"no projections for {season}. Run: statify compute generate-projections --season {season}"
         )
+
+    cleared = 0
+    left_alone = 0
+    if reprice:
+        count_query = MATCHED_COUNT_QUERY
+        count_params: dict = {"season": season}
+        if week is not None:
+            count_query += " AND week = :week"
+            count_params["week"] = week
+        matched_before = conn.execute(count_query, count_params).fetchone()[0]
+        ids = reprice_ids(conn, season, utc_now(), week)
+        if ids:
+            conn.execute("BEGIN")
+            try:
+                conn.executemany(REPRICE_CLEAR, [{"id": i} for i in ids])
+                conn.execute("COMMIT")
+            except sqlite3.Error:
+                conn.execute("ROLLBACK")
+                raise
+        cleared = len(ids)
+        left_alone = matched_before - cleared
 
     query = PROJECTIONS_QUERY
     params: dict = {"season": season}
@@ -207,4 +288,4 @@ def load_edges(
         except sqlite3.Error:
             conn.execute("ROLLBACK")
             raise
-    return len(updates), later
+    return EdgeResult(len(updates), later, cleared, left_alone)

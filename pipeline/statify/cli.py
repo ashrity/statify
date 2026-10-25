@@ -489,15 +489,25 @@ def _cmd_compute_generate_projections(args: argparse.Namespace) -> int:
 
 def _cmd_compute_edge(args: argparse.Namespace) -> int:
     with connection() as conn:
-        rows, later = edge.load_edges(conn, args.season, args.week)
+        result = edge.load_edges(conn, args.season, args.week, reprice=args.reprice)
 
     scope = f"week {args.week}" if args.week is not None else "full season"
-    print(f"{rows} projection rows matched to a market line and scored for {args.season} {scope}")
-    print("match is temporal: the latest prop_lines capture at or before each projection's own generated_at")
-    if later:
+    if args.reprice:
         print(
-            f"  {later} of those had no capture at or before generation and fell back to the"
+            f"{result.cleared} previously matched rows repriced for {args.season} {scope}"
+            f"; {result.left_alone} left alone because their game has kicked off"
+        )
+    print(f"{result.matched} projection rows matched to a market line and scored for {args.season} {scope}")
+    print("match is temporal: the latest prop_lines capture at or before each projection's own generated_at")
+    if result.later:
+        print(
+            f"  {result.later} of those had no capture at or before generation and fell back to the"
             " earliest capture after it"
+        )
+    if result.cleared:
+        print(
+            f"  confidence was cleared with the edge it was derived from. Run:"
+            f" statify compute confidence --season {args.season}"
         )
     return 0
 
@@ -866,6 +876,11 @@ def build_parser() -> argparse.ArgumentParser:
     edge_cmd = computations.add_parser("edge", help="match projections to market lines and calculate the edge")
     edge_cmd.add_argument("--season", type=int, required=True, help="season year, e.g. 2026")
     edge_cmd.add_argument("--week", type=int, help="limit to one week; omit for the whole season")
+    edge_cmd.add_argument(
+        "--reprice",
+        action="store_true",
+        help="re-match rows already matched, for games that have not kicked off, so a newer capture is used",
+    )
     edge_cmd.set_defaults(func=_cmd_compute_edge)
 
     backtest_cmd = computations.add_parser("backtest", help="join each projection to what actually happened")

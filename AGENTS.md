@@ -697,6 +697,47 @@ A `NULL` line is skipped as a candidate rather than blocking the match, since
 a NULL carries no number to beat. Previously a NULL at the latest prior capture
 discarded the projection entirely.
 
+**`--reprice` is the one way to re-score an already-matched row**, and it is
+opt-in because it discards what that projection was measured against. Without
+it a fresh props capture cannot reach the board at all: every matched row keeps
+the line it was first matched to, so a new capture only reaches rows that were
+never matched. With it, matched rows in scope are cleared and re-matched
+against the newest capture available.
+
+Two guards. It only touches projections whose **game has not kicked off**,
+because a line for a played game is history and rewriting it would also
+desynchronise `backtest_results.beat_line`, which is derived from
+`market_line`; a projection whose game cannot be resolved through
+`player_matchup_environment_weekly` is left alone rather than guessed at. And
+it clears `confidence` along with the `edge` that confidence was derived from,
+rather than leaving a number describing a line the row no longer points at, so
+the output names `compute confidence` to re-run. Verified on a 2026 week 7
+scratch copy: 1,224 rows repriced, the 123 belonging to the already-played
+NE @ CHI left untouched with their confidence intact.
+
+The mid-week-to-kickoff sequence is therefore:
+
+```
+uv run statify ingest props --season <y> --week <n>     # spends credits
+uv run statify compute edge --season <y> --week <n> --reprice
+uv run statify compute confidence --season <y> --week <n>
+```
+
+Regenerating projections first is an alternative that needs no flag, because a
+new generation carries a fresh `generated_at` and matches the new capture as
+genuinely prior; but feature 20's content-based novelty only stores a new row
+when `projected_value` actually changed, so that path is not reliable when no
+upstream data has moved.
+
+**The projection has no injury input at all**, which matters most in exactly
+this window. Nothing in the pipeline reads the `injuries` table: feature 5
+ingests injury reports and no `compute` step consumes them, the same situation
+as `depth_charts`. For 2026 the table is empty anyway, since the current-season
+feed has a different column set and `ingest injuries` fails outright. A player
+ruled out an hour ago still projects at full volume, and the market will have
+moved where the model cannot. Treat a large edge on a skill player as a prompt
+to check his status by hand.
+
 **No consensus across books.** `team_market_data` and
 `game_environment_weekly` compute a median across books for team-level
 lines; nothing here does that for player props, matching the locked

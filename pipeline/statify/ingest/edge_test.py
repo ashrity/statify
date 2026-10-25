@@ -1,13 +1,18 @@
+import sqlite3
+
 import pytest
 
+from statify import migrate as migrations
 from statify.ingest.edge import (
     american_to_probability,
     earliest_after,
     edge_updates,
     latest_at_or_before,
+    load_edges,
     market_value,
     matched_pairs,
     prop_lines_by_key,
+    reprice_ids,
 )
 
 
@@ -263,3 +268,128 @@ def test_prop_lines_by_key_sorts_each_group_by_captured_at_then_id():
     grouped = prop_lines_by_key(lines)
     key = ("WR1", 3, "receiving_yards")
     assert [row["id"] for row in grouped[key]] == [1, 2]
+
+
+# --- repricing: discard a match so a newer capture can be taken ----------------
+
+
+@pytest.fixture()
+def db():
+    connection = sqlite3.connect(":memory:", isolation_level=None)
+    connection.row_factory = sqlite3.Row
+    migrations.migrate(connection)
+    yield connection
+    connection.close()
+
+
+def seed(conn, kickoff_at, captured_at, generated_at, line=60.5, market_line=55.0):
+    """One projection already matched to one line, for a game at kickoff_at."""
+    stamp = "2026-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO teams (team_abbr, name, updated_at) VALUES ('NE', 'New England', ?)", (stamp,)
+    )
+    conn.execute(
+        "INSERT INTO teams (team_abbr, name, updated_at) VALUES ('CHI', 'Chicago', ?)", (stamp,)
+    )
+    conn.execute(
+        "INSERT INTO players (player_id, name, position, team_abbr, updated_at)"
+        " VALUES ('P1', 'Test', 'WR', 'NE', ?)",
+        (stamp,),
+    )
+    conn.execute(
+        "INSERT INTO games"
+        " (game_id, season, week, game_type, kickoff_at, home_team, away_team, updated_at)"
+        " VALUES ('G1', 2026, 7, 'REG', ?, 'CHI', 'NE', ?)",
+        (kickoff_at, stamp),
+    )
+    conn.execute(
+        "INSERT INTO player_matchup_environment_weekly"
+        " (player_id, season, week, team_abbr, opponent_team_abbr, position,"
+        "  pass_matchup_k, rush_matchup_k, environment_m, updated_at)"
+        " VALUES ('P1', 2026, 7, 'NE', 'CHI', 'WR', 0.0, 0.5, 0.0, ?)",
+        (stamp,),
+    )
+    conn.execute(
+        "INSERT INTO prop_lines"
+        " (id, player_id, game_id, season, week, stat_type, book, line, captured_at, updated_at)"
+        " VALUES (10, 'P1', 'G1', 2026, 7, 'receiving_yards', 'dk', ?, ?, ?)",
+        (line, captured_at, stamp),
+    )
+    conn.execute(
+        "INSERT INTO projections"
+        " (id, player_id, season, week, stat_type, model_version, projected_value,"
+        "  market_line, prop_line_id, edge, confidence, generated_at)"
+        " VALUES (1, 'P1', 2026, 7, 'receiving_yards', 'v1', 70.0, ?, 10, ?, 0.8, ?)",
+        (market_line, 70.0 - market_line, generated_at),
+    )
+
+
+def row(conn):
+    return conn.execute(
+        "SELECT market_line, prop_line_id, edge, confidence FROM projections WHERE id = 1"
+    ).fetchone()
+
+
+def test_without_reprice_an_already_matched_row_is_untouched(db):
+    seed(db, "2099-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00")
+    result = load_edges(db, 2026)
+    assert result.matched == 0
+    assert result.cleared == 0
+    assert row(db)["market_line"] == 55.0
+
+
+def test_reprice_rematches_against_the_newer_capture(db):
+    """The whole point: a fresh capture reaches a row that was already matched."""
+    seed(db, "2099-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00")
+    result = load_edges(db, 2026, reprice=True)
+    assert result.cleared == 1
+    assert result.matched == 1
+    after = row(db)
+    assert after["market_line"] == 60.5
+    assert after["edge"] == pytest.approx(70.0 - 60.5)
+
+
+def test_reprice_leaves_a_game_that_has_kicked_off_alone(db):
+    """A line for a played game is history, and beat_line is derived from it."""
+    seed(db, "2020-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00")
+    result = load_edges(db, 2026, reprice=True)
+    assert result.cleared == 0
+    assert result.left_alone == 1
+    assert row(db)["market_line"] == 55.0
+
+
+def test_reprice_clears_the_confidence_derived_from_the_old_edge(db):
+    seed(db, "2099-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00")
+    load_edges(db, 2026, reprice=True)
+    # Re-matched in the same run, so confidence stays NULL until compute
+    # confidence runs again rather than describing the line it no longer points at.
+    assert row(db)["confidence"] is None
+
+
+def test_reprice_scope_respects_the_week_filter(db):
+    seed(db, "2099-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00")
+    result = load_edges(db, 2026, week=9, reprice=True)
+    assert result.cleared == 0
+    assert row(db)["market_line"] == 55.0
+
+
+def test_reprice_ids_skips_a_projection_whose_game_cannot_be_resolved(db):
+    seed(db, "2099-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00")
+    db.execute("DELETE FROM player_matchup_environment_weekly")
+    assert reprice_ids(db, 2026, "2026-06-01T00:00:00+00:00") == []
+
+
+def test_left_alone_is_scoped_to_the_week_not_the_season(db):
+    """Otherwise a week-scoped clear is subtracted from a season-wide total."""
+    seed(db, "2020-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00")
+    # A second matched projection in a different week, which --week 7 must ignore.
+    db.execute(
+        "INSERT INTO projections"
+        " (id, player_id, season, week, stat_type, model_version, projected_value,"
+        "  market_line, prop_line_id, edge, generated_at)"
+        " VALUES (2, 'P1', 2026, 9, 'receiving_yards', 'v1', 70.0, 55.0, 10, 15.0,"
+        "  '2026-01-02T00:00:00+00:00')"
+    )
+    result = load_edges(db, 2026, week=7, reprice=True)
+    assert result.cleared == 0
+    assert result.left_alone == 1
