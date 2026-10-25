@@ -38,6 +38,14 @@ function warnings(row: BoardRow): string[] {
         `account for sample size, only for how much the number moves.`,
     );
   }
+  if (row.designation) {
+    const practice = row.practiceStatus ? `, practice: ${row.practiceStatus}` : "";
+    out.push(
+      `Listed ${row.designation} on the latest injury report${practice}. The projection ` +
+        `does not know: nothing upstream reads injury data, so his volume above is built ` +
+        `as though he were starting, and his team-mates' volume is too.`,
+    );
+  }
   if (row.lineCapturedLater) {
     out.push(
       "This line was captured after the projection was generated, so the projection " +

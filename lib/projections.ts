@@ -59,6 +59,10 @@ export interface BoardRow {
   priorGames: number | null;
   /** True when the matched line was captured after the projection was generated. */
   lineCapturedLater: boolean;
+  /** Out, Doubtful, Questionable, or null when the player is not on the report. */
+  designation: string | null;
+  /** DNP, Limited or Full. */
+  practiceStatus: string | null;
 }
 
 export interface BoardFilters {
@@ -67,6 +71,8 @@ export interface BoardFilters {
   position?: string;
   statType?: string;
   game?: string;
+  /** Show players the latest injury report rules Out. Off by default. */
+  includeUnavailable?: boolean;
 }
 
 export interface BoardGame {
@@ -138,6 +144,8 @@ SELECT
   v.own_stddev AS ownStddev,
   me.pass_matchup_multiplier AS passMatchupMultiplier,
   me.rush_matchup_multiplier AS rushMatchupMultiplier,
+  inj.designation AS designation,
+  inj.practice_status AS practiceStatus,
   o.games_played AS priorGames,
   -- Recoverable without a column on projections: a line captured after the
   -- projection was generated means compute edge took its later-capture
@@ -166,10 +174,23 @@ LEFT JOIN player_variance_weekly v
 LEFT JOIN games g
   ON g.season = p.season AND g.week = p.week
  AND (g.home_team = me.team_abbr OR g.away_team = me.team_abbr)
+-- The latest report for that player and week. Designations move through the
+-- week, which is why report_at is part of this table's key, so an unqualified
+-- join would multiply a row by every revision.
+LEFT JOIN injuries inj
+  ON inj.player_id = p.player_id AND inj.season = p.season AND inj.week = p.week
+ AND inj.report_at = (
+      SELECT MAX(i2.report_at) FROM injuries i2
+      WHERE i2.player_id = p.player_id AND i2.season = p.season AND i2.week = p.week
+    )
 WHERE p.edge IS NOT NULL
   AND (:position IS NULL OR pl.position = :position)
   AND (:statType IS NULL OR p.stat_type = :statType)
   AND (:game IS NULL OR g.game_id = :game)
+  -- A projection for a player who will not play is not wrong so much as
+  -- meaningless, and the model has no idea: nothing upstream reads this table,
+  -- so his volume is still projected as though he were starting.
+  AND (:includeUnavailable = 1 OR inj.designation IS NULL OR inj.designation <> 'Out')
 ORDER BY p.edge DESC
 `;
 
@@ -206,6 +227,7 @@ export function getWeeklyBoard(filters: BoardFilters): BoardRow[] {
       position: filters.position ?? null,
       statType: filters.statType ?? null,
       game: filters.game ?? null,
+      includeUnavailable: filters.includeUnavailable ? 1 : 0,
     }) as RawBoardRow[];
 
   return rows.map((row) => ({ ...row, lineCapturedLater: row.lineCapturedLater === 1 }));

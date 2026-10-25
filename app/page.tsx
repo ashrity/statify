@@ -78,13 +78,23 @@ export default async function Home({
   const position = asString(params.position);
   const statType = asString(params.statType);
   const game = asString(params.game);
+  const includeUnavailable = asString(params.includeUnavailable) === "1";
 
   const latest = getLatestBoardWeek();
   const season = requestedSeason ? Number(requestedSeason) : latest?.season;
   const week = requestedWeek ? Number(requestedWeek) : latest?.week;
 
   const rows: Row[] =
-    season && week ? getWeeklyBoard({ season, week, position, statType, game }) : [];
+    season && week
+      ? getWeeklyBoard({ season, week, position, statType, game, includeUnavailable })
+      : [];
+  // Counted rather than inferred, so the note can say how many are hidden
+  // without a second opinion about what "unavailable" means.
+  const withUnavailable: Row[] =
+    season && week && !includeUnavailable
+      ? getWeeklyBoard({ season, week, position, statType, game, includeUnavailable: true })
+      : rows;
+  const hidden = withUnavailable.length - rows.length;
   const games: BoardGame[] = season && week ? getBoardGames(season, week) : [];
 
   const current = {
@@ -93,6 +103,7 @@ export default async function Home({
     position,
     statType,
     game,
+    includeUnavailable: includeUnavailable ? "1" : undefined,
   };
 
   const overs = rows.filter((row) => row.edge > 0).length;
@@ -170,6 +181,27 @@ export default async function Home({
             ))}
           </div>
         )}
+
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <FilterLink
+            href={buildHref(current, { includeUnavailable: undefined })}
+            active={!includeUnavailable}
+          >
+            Available only
+          </FilterLink>
+          <FilterLink
+            href={buildHref(current, { includeUnavailable: "1" })}
+            active={includeUnavailable}
+          >
+            Include players listed Out
+          </FilterLink>
+          {!includeUnavailable && hidden > 0 && (
+            <span className="text-xs text-muted">
+              {hidden} row{hidden === 1 ? "" : "s"} hidden: the latest injury report rules
+              those players Out
+            </span>
+          )}
+        </div>
 
         {/* An edge is only comparable within one stat type, so a mixed board is
             ranked but not like for like. Worth saying once, above the table. */}

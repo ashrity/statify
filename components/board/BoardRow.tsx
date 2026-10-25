@@ -43,6 +43,17 @@ export function BoardRow({ row }: { row: Row }) {
             <span className="block text-xs text-muted">
               {row.position} {row.teamAbbr}
               {row.opponentTeamAbbr && ` vs ${row.opponentTeamAbbr}`}
+              {row.designation && (
+                <span
+                  className={`ml-1.5 rounded px-1 py-0.5 text-[10px] font-semibold uppercase ${
+                    row.designation === "Questionable"
+                      ? "bg-surface text-muted"
+                      : "bg-negative/15 text-negative"
+                  }`}
+                >
+                  {row.designation === "Questionable" ? "Q" : row.designation}
+                </span>
+              )}
             </span>
           </span>
         </span>

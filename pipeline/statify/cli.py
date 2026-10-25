@@ -149,11 +149,13 @@ def _cmd_ingest_depth(args: argparse.Namespace) -> int:
 
 def _cmd_ingest_injuries(args: argparse.Namespace) -> int:
     with connection() as conn:
-        upserted, skipped = injuries.load_injuries(conn, args.season, args.week)
+        upserted, skipped, unchanged = injuries.load_injuries(conn, args.season, args.week)
 
     scope = f"week {args.week}" if args.week is not None else "full season"
     print(f"{upserted} injury rows upserted for {args.season} {scope}")
     print(f"{skipped} rows skipped (player not in the players table)")
+    if unchanged:
+        print(f"{unchanged} unchanged since the last report (this feed has no timestamp of its own)")
     return 0
 
 

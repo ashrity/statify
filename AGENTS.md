@@ -301,9 +301,39 @@ of the game being projected. Feature 14b adds a forecast source first; migration
 
 **2026 cannot have routes or defensive tendencies.** nflverse participation data
 stops at 2025, so for 2026 `ingest routes` fails outright, every `yprr` is NULL,
-and `compute tendencies` has no input. `ingest depth` and `ingest injuries` also
-fail on 2026 while still working on 2024: the current-season feeds have a
-different column set. None of that is repaired yet.
+and `compute tendencies` has no input. `ingest depth` still fails on 2026 while
+working on 2024: the current-season feed has a different column set. Neither is
+repaired.
+
+**`ingest injuries` now works on 2026.** The only column the current-season
+feed was missing is `date_modified`; all 15 others match, and the status
+vocabulary is identical. Since `report_at` is part of this table's key, those
+rows are stamped with the ingest time and novelty is decided by **content**, the
+rule `ingest market` and `ingest forecast` already follow: a designation that
+has not moved since the latest stored report is not stored again. Without that,
+every run would add a row per player per week, because `utc_now()` differs on
+every run. Measured on 2026: a first run stored 640 rows (1,498 skipped as
+non-skill players), and an immediate second run stored 0 and reported 640
+unchanged.
+
+**Nothing in the pipeline reads `injuries`, and the board is the only consumer.**
+Feature 5 ingests injury reports and no `compute` step consumes them, the same
+situation as `depth_charts`. So a projection is built as though every player
+starts. The weekly board therefore **hides players the latest report rules
+`Out`** by default, with an `Include players listed Out` toggle and a count of
+what was hidden; `Doubtful` and `Questionable` are shown with a badge rather
+than hidden, since they may well play. The injury join picks the row with the
+largest `report_at` for that player and week, because designations move through
+the week and an unqualified join would multiply a board row by every revision.
+Measured on 2026 week 7: 12 of 697 rows hidden across 11 players, among them
+Mike Evans, Rashee Rice, David Montgomery and Tyler Warren.
+
+**Hiding him is not the same as modelling his absence.** The remaining
+projections still assume he played, so the volume that should flow to his
+backup never does: a ruled-out starter's team-mates are under-projected, and no
+feature redistributes opportunity. The per-row panel says so on any row
+carrying a designation. Redistribution is a real modelling feature, not a
+filter, and is not built.
 
 `compute usage` reads `weekly_actuals`, so re-run it after anything that writes
 that table: `ingest weekly`, `ingest snaps`, `ingest redzone`, or `ingest

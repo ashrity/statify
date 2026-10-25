@@ -28,8 +28,17 @@ SOURCE_COLUMNS = [
     "gsis_id",
     "report_status",
     "practice_status",
-    "date_modified",
 ]
+
+# The current-season feed drops date_modified: 2024 carries it, 2026 does not,
+# while every other column matches. report_at is part of this table's key, so
+# without it there is no upstream timestamp to key a revision on. Rather than
+# fail the season outright, those rows are stamped with the ingest time and
+# novelty is decided by content, the rule ingest market and ingest forecast
+# already follow: a designation that has not changed since the latest stored
+# report is not stored again. Without that, every run would add a row per
+# player per week, because utc_now() differs on every run.
+TIMESTAMP_COLUMN = "date_modified"
 
 INJURY_UPSERT = """
 INSERT INTO injuries (
@@ -77,7 +86,15 @@ def normalize_designation(value: str | None) -> str | None:
     return designation
 
 
-def injury_row(source: dict, updated_at: str) -> dict:
+LATEST_REPORTS_QUERY = """
+SELECT player_id, week, designation, practice_status
+FROM injuries
+WHERE season = :season
+ORDER BY report_at
+"""
+
+
+def injury_row(source: dict, updated_at: str, report_at: str) -> dict:
     return {
         "player_id": source["gsis_id"],
         "season": source["season"],
@@ -85,32 +102,67 @@ def injury_row(source: dict, updated_at: str) -> dict:
         "team_abbr": normalize_team(source["team"]),
         "designation": normalize_designation(source["report_status"]),
         "practice_status": normalize_practice_status(source["practice_status"]),
-        "report_at": source["date_modified"].isoformat(timespec="seconds"),
+        "report_at": report_at,
         "updated_at": updated_at,
     }
 
 
+def latest_reports(conn: sqlite3.Connection, season: int) -> dict[tuple[str, int], tuple]:
+    """The most recent stored (designation, practice_status) per player and week."""
+    latest: dict[tuple[str, int], tuple] = {}
+    for row in conn.execute(LATEST_REPORTS_QUERY, {"season": season}):
+        latest[(row[0], row[1])] = (row[2], row[3])
+    return latest
+
+
+def is_unchanged(row: dict, latest: dict[tuple[str, int], tuple]) -> bool:
+    key = (row["player_id"], row["week"])
+    if key not in latest:
+        return False
+    return latest[key] == (row["designation"], row["practice_status"])
+
+
 def load_injuries(
     conn: sqlite3.Connection, season: int, week: int | None = None
-) -> tuple[int, int]:
-    """Upsert one season's injury reports. Returns (upserted, skipped)."""
-    frame = nflverse.injuries(season).select(SOURCE_COLUMNS)
+) -> tuple[int, int, int]:
+    """Upsert one season's injury reports.
+
+    Returns (upserted, skipped, unchanged). unchanged is always 0 when the feed
+    carries its own timestamp, since novelty is then the key's own business.
+    """
+    frame = nflverse.injuries(season)
+    has_timestamp = TIMESTAMP_COLUMN in frame.columns
+    columns = SOURCE_COLUMNS + ([TIMESTAMP_COLUMN] if has_timestamp else [])
+    frame = frame.select(columns)
+
     known_players = {row[0] for row in conn.execute("SELECT player_id FROM players")}
     updated_at = utc_now()
+    latest = {} if has_timestamp else latest_reports(conn, season)
 
     rows: list[dict] = []
     skipped = 0
+    unchanged = 0
     for source in frame.iter_rows(named=True):
         if week is not None and source["week"] != week:
             continue
         if source["gsis_id"] not in known_players:
             skipped += 1
             continue
-        if source["date_modified"] is None:
-            skipped += 1
-            continue
 
-        rows.append(injury_row(source, updated_at))
+        if has_timestamp:
+            stamp = source[TIMESTAMP_COLUMN]
+            if stamp is None:
+                skipped += 1
+                continue
+            report_at = stamp.isoformat(timespec="seconds")
+        else:
+            report_at = updated_at
+
+        row = injury_row(source, updated_at, report_at)
+        if not has_timestamp and is_unchanged(row, latest):
+            unchanged += 1
+            continue
+        rows.append(row)
 
     write(conn, INJURY_UPSERT, rows)
-    return len(rows), skipped
+    return len(rows), skipped, unchanged
