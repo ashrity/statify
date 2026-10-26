@@ -768,11 +768,39 @@ ruled out an hour ago still projects at full volume, and the market will have
 moved where the model cannot. Treat a large edge on a skill player as a prompt
 to check his status by hand.
 
+**`BOOK_PREFERENCE` decides which book's line is used: DraftKings, then
+FanDuel.** This is the project's first preferred-book concept. Until it existed
+the tie between books capturing at the same instant broke on `prop_lines.id`,
+which is arbitrary, and on 2026 week 7 that handed **490 of 697** board rows to
+bovada and the rest across five books.
+
+Capture time is still settled first; the book only breaks a tie within one
+instant. So an earlier valid FanDuel line beats a later DraftKings one, exactly
+as the temporal rule requires, and `best_book` only chooses among the lines
+sharing the winning `captured_at`. Within one book the tie still breaks on id,
+so the choice stays deterministic.
+
+**It filters which line is used, not which are captured.** `ingest props` still
+stores every book, because the Odds API charges per market and event rather
+than per book, so narrowing here saves no credits, and the other books stay
+available as history and as the input a consensus feature would need.
+Restricting costs almost no coverage: measured on 2026 week 7, 690 of 720
+player/stat keys still have a line from one of the two, and the board went from
+697 rows to 669 (648 DraftKings, 8 FanDuel at the latest generation).
+
+Applying it to a week already matched needed an explicit one-off clear of
+week 7's `market_line`/`prop_line_id`/`edge`/`confidence`, because `compute
+edge` never revisits a matched row and `--reprice` deliberately refuses a game
+that has kicked off, which 13 of week 7's 14 were. `compute backtest` and
+`compute accuracy` were re-run after, since `beat_line` is derived from
+`market_line`. The same explicit route the touchdown pricing change used.
+
 **No consensus across books.** `team_market_data` and
 `game_environment_weekly` compute a median across books for team-level
 lines; nothing here does that for player props, matching the locked
-`projections` schema's single `prop_line_id`. One capture, temporally
-correct, is the whole scope; a consensus version is a retune candidate.
+`projections` schema's single `prop_line_id`. One capture from one preferred
+book, temporally correct, is the whole scope; a consensus version is a retune
+candidate.
 
 **`touchdowns` is measured against the book's price, not the 0.5 line.** The
 posted 0.5 is not the market's opinion; it only encodes "at least one". Scoring

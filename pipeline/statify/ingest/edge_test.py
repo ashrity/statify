@@ -11,6 +11,7 @@ from statify.ingest.edge import (
     load_edges,
     market_value,
     matched_pairs,
+    best_book,
     prop_lines_by_key,
     reprice_ids,
 )
@@ -27,12 +28,13 @@ def projection(player, week, stat_type, projected_value, generated_at, pid=1):
     }
 
 
-def prop_line(player, week, stat_type, line, captured_at, lid, over_odds=None):
+def prop_line(player, week, stat_type, line, captured_at, lid, over_odds=None, book="draftkings"):
     return {
         "id": lid,
         "player_id": player,
         "week": week,
         "stat_type": stat_type,
+        "book": book,
         "line": line,
         "over_odds": over_odds,
         "captured_at": captured_at,
@@ -312,7 +314,7 @@ def seed(conn, kickoff_at, captured_at, generated_at, line=60.5, market_line=55.
     conn.execute(
         "INSERT INTO prop_lines"
         " (id, player_id, game_id, season, week, stat_type, book, line, captured_at, updated_at)"
-        " VALUES (10, 'P1', 'G1', 2026, 7, 'receiving_yards', 'dk', ?, ?, ?)",
+        " VALUES (10, 'P1', 'G1', 2026, 7, 'receiving_yards', 'draftkings', ?, ?, ?)",
         (line, captured_at, stamp),
     )
     conn.execute(
@@ -393,3 +395,64 @@ def test_left_alone_is_scoped_to_the_week_not_the_season(db):
     result = load_edges(db, 2026, week=7, reprice=True)
     assert result.cleared == 0
     assert result.left_alone == 1
+
+
+# --- which book's line gets used -----------------------------------------------
+
+
+def test_a_book_outside_the_preference_is_never_matched():
+    """bovada had 490 of 697 board rows before this, purely on the id tiebreak."""
+    proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-02T00:00:00+00:00")
+    lines = [prop_line("WR1", 3, "receiving_yards", 60.5, "2026-01-01T00:00:00+00:00", 1, book="bovada")]
+    assert edge_updates([proj], lines) == []
+
+
+def test_draftkings_wins_a_simultaneous_capture():
+    proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-02T00:00:00+00:00")
+    lines = [
+        prop_line("WR1", 3, "receiving_yards", 58.5, "2026-01-01T00:00:00+00:00", 1, book="fanduel"),
+        prop_line("WR1", 3, "receiving_yards", 60.5, "2026-01-01T00:00:00+00:00", 2, book="draftkings"),
+    ]
+    assert edge_updates([proj], lines)[0]["market_line"] == 60.5
+
+
+def test_the_lower_id_does_not_win_over_the_preferred_book():
+    """The old behaviour: whichever row happened to be inserted first."""
+    proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-02T00:00:00+00:00")
+    lines = [
+        prop_line("WR1", 3, "receiving_yards", 58.5, "2026-01-01T00:00:00+00:00", 1, book="fanduel"),
+        prop_line("WR1", 3, "receiving_yards", 60.5, "2026-01-01T00:00:00+00:00", 99, book="draftkings"),
+    ]
+    assert edge_updates([proj], lines)[0]["prop_line_id"] == 99
+
+
+def test_fanduel_is_used_when_draftkings_has_no_line():
+    proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-02T00:00:00+00:00")
+    lines = [prop_line("WR1", 3, "receiving_yards", 58.5, "2026-01-01T00:00:00+00:00", 1, book="fanduel")]
+    assert edge_updates([proj], lines)[0]["market_line"] == 58.5
+
+
+def test_a_later_draftkings_capture_still_loses_to_an_earlier_valid_one():
+    """Capture time is settled first; the book only breaks a tie within it."""
+    proj = projection("WR1", 3, "receiving_yards", 65.0, "2026-01-03T00:00:00+00:00")
+    lines = [
+        prop_line("WR1", 3, "receiving_yards", 58.5, "2026-01-02T00:00:00+00:00", 1, book="fanduel"),
+        prop_line("WR1", 3, "receiving_yards", 60.5, "2026-01-05T00:00:00+00:00", 2, book="draftkings"),
+    ]
+    assert edge_updates([proj], lines)[0]["market_line"] == 58.5
+
+
+def test_best_book_breaks_a_same_book_tie_on_id():
+    lines = [
+        prop_line("WR1", 3, "receiving_yards", 60.5, "2026-01-01T00:00:00+00:00", 7, book="draftkings"),
+        prop_line("WR1", 3, "receiving_yards", 61.5, "2026-01-01T00:00:00+00:00", 3, book="draftkings"),
+    ]
+    assert best_book(lines)["id"] == 3
+
+
+def test_a_touchdowns_price_from_an_excluded_book_is_not_used():
+    proj = projection("RB1", 3, "touchdowns", 0.42, "2026-01-02T00:00:00+00:00")
+    lines = [
+        prop_line("RB1", 3, "touchdowns", 0.5, "2026-01-01T00:00:00+00:00", 1, over_odds=-200, book="bovada"),
+    ]
+    assert edge_updates([proj], lines) == []

@@ -51,10 +51,24 @@ WHERE season = :season AND market_line IS NULL
 """
 
 PROP_LINES_QUERY = """
-SELECT id, player_id, week, stat_type, line, over_odds, captured_at
+SELECT id, player_id, week, stat_type, book, line, over_odds, captured_at
 FROM prop_lines
 WHERE season = :season
 """
+
+# Which book's line a projection is scored against, most preferred first.
+# This is the project's first preferred-book concept: until now the tie between
+# books capturing at the same instant broke on prop_lines.id, which is
+# arbitrary, and on 2026 week 7 that handed 490 of 697 board rows to bovada.
+#
+# It filters which line is *used*, not which are captured. ingest props still
+# stores every book, because the Odds API charges per market and event rather
+# than per book, so narrowing here saves nothing and the other books stay
+# available as history and as the input a consensus feature would need.
+#
+# Restricting costs almost no coverage: measured on 2026 week 7, 690 of 720
+# player/stat keys still have a line from one of these two.
+BOOK_PREFERENCE = ("draftkings", "fanduel")
 
 EDGE_UPDATE = """
 UPDATE projections
@@ -169,6 +183,14 @@ def earliest_after(candidates: list[dict], generated_at: str) -> dict | None:
     return None
 
 
+def best_book(candidates: list[dict]) -> dict:
+    """Among lines captured at one instant, the most preferred book's.
+
+    Ties within a book still break on id, so the choice stays deterministic.
+    """
+    return min(candidates, key=lambda r: (BOOK_PREFERENCE.index(r["book"]), r["id"]))
+
+
 def edge_update(projection: dict, prop_line: dict) -> dict:
     market = market_value(prop_line, projection["stat_type"])
     return {
@@ -194,7 +216,8 @@ def matched_pairs(
         candidates = [
             row
             for row in grouped.get(key, [])
-            if market_value(row, projection["stat_type"]) is not None
+            if row["book"] in BOOK_PREFERENCE
+            and market_value(row, projection["stat_type"]) is not None
         ]
         match = latest_at_or_before(candidates, projection["generated_at"])
         was_later = False
@@ -203,7 +226,10 @@ def matched_pairs(
             was_later = match is not None
         if match is None:
             continue
-        pairs.append((projection, match, was_later))
+        # The capture instant is settled above; the book is settled here, so a
+        # simultaneous capture does not fall to whichever row was inserted first.
+        same_instant = [r for r in candidates if r["captured_at"] == match["captured_at"]]
+        pairs.append((projection, best_book(same_instant), was_later))
     return pairs
 
 
